@@ -16,9 +16,9 @@ AIS Plus announcement event
 
 ## Current State
 
-Version `0.2.2` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, and can play the combined WAV locally on the Signal K server.
+Version `0.2.3` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, and can play the combined WAV locally on the Signal K server.
 
-Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`.
+Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
 
 The next implementation step is updating AIS Plus Companion to subscribe to the rendered announcement output and play these MP3 files on iPhone, iPad, Android, and desktop browsers.
 
@@ -26,7 +26,7 @@ The next implementation step is updating AIS Plus Companion to subscribe to the 
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.2.2 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.2.3 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
