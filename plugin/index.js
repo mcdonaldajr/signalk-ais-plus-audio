@@ -608,6 +608,7 @@ module.exports = function aisPlusAudio(app) {
     return {
       plugin: PLUGIN_ID,
       version: packageInfo.version,
+      serverTime: new Date().toISOString(),
       enabled: options.enabled,
       muted: options.muted,
       localPlayback: options.localPlayback,

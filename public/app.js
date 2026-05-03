@@ -4,6 +4,7 @@ const renderedCount = document.getElementById("renderedCount");
 const filteredCount = document.getElementById("filteredCount");
 const streamCount = document.getElementById("streamCount");
 const droppedStreamCount = document.getElementById("droppedStreamCount");
+const serverTime = document.getElementById("serverTime");
 const lastAnnouncement = document.getElementById("lastAnnouncement");
 const lastAudio = document.getElementById("lastAudio");
 const audioDirectory = document.getElementById("audioDirectory");
@@ -60,6 +61,7 @@ function renderStatus(status) {
   filteredCount.textContent = status.stats?.filtered ?? 0;
   streamCount.textContent = status.liveStreamClients ?? 0;
   droppedStreamCount.textContent = status.droppedLaggingClients ?? 0;
+  serverTime.textContent = formatTime(status.serverTime);
   audioDirectory.textContent = status.audioDirectory || "";
   streamUrl.textContent =
     status.publicStreamUrl ||
