@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const http = require("node:http");
+const https = require("node:https");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
@@ -20,6 +21,7 @@ module.exports = function aisPlusAudio(app) {
   let liveSilenceFile = null;
   let liveStreamPauseUntil = 0;
   let publicStreamServer = null;
+  let publicStreamIsHttps = false;
   const liveStreamClients = new Set();
   let stats = {
     received: 0,
@@ -89,9 +91,9 @@ module.exports = function aisPlusAudio(app) {
       },
       publicHttpStream: {
         type: "boolean",
-        title: "Enable unauthenticated local stream port",
+        title: "Enable local stream port",
         description:
-          "Serves only the live audio stream on a separate local HTTP port, so native radio apps do not need a Signal K login.",
+          "Serves only the live audio stream on a separate local port, so native radio apps do not need a Signal K login.",
         default: true,
       },
       publicHttpStreamPort: {
@@ -100,6 +102,13 @@ module.exports = function aisPlusAudio(app) {
         default: 3445,
         minimum: 1024,
         maximum: 65535,
+      },
+      publicStreamUseHttps: {
+        type: "boolean",
+        title: "Use HTTPS for local stream port",
+        description:
+          "Uses Signal K ssl-cert.pem and ssl-key.pem from the server config directory. Recommended for iPhone/iPad.",
+        default: true,
       },
       piperBinary: {
         type: "string",
@@ -302,6 +311,7 @@ module.exports = function aisPlusAudio(app) {
       liveStream: value.liveStream !== false,
       publicHttpStream: value.publicHttpStream !== false,
       publicHttpStreamPort: clampInteger(value.publicHttpStreamPort, 1024, 65535, 3445),
+      publicStreamUseHttps: value.publicStreamUseHttps !== false,
       piperBinary: expandHome(String(value.piperBinary || "piper")),
       ffmpegBinary: expandHome(String(value.ffmpegBinary || "ffmpeg")),
       audioPlayer: expandHome(String(value.audioPlayer || "aplay")),
@@ -550,8 +560,10 @@ module.exports = function aisPlusAudio(app) {
       playlistUrl: `/plugins/${PLUGIN_ID}/live.m3u`,
       publicHttpStream: options.publicHttpStream,
       publicHttpStreamPort: options.publicHttpStreamPort,
-      publicStreamUrl: `http://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.mp3`,
-      publicPlaylistUrl: `http://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.m3u`,
+      publicStreamUseHttps: options.publicStreamUseHttps,
+      publicStreamProtocol: publicStreamProtocol(),
+      publicStreamUrl: `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.mp3`,
+      publicPlaylistUrl: `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.m3u`,
       masterVolumePercent: options.masterVolumePercent,
       speechVolumePercent: options.speechVolumePercent,
       pingVolumePercent: options.pingVolumePercent,
@@ -666,7 +678,9 @@ module.exports = function aisPlusAudio(app) {
 
   function startPublicStreamServer() {
     if (!options.publicHttpStream || publicStreamServer) return;
-    publicStreamServer = http.createServer((req, res) => {
+    const tlsOptions = publicStreamTlsOptions();
+    publicStreamIsHttps = Boolean(tlsOptions);
+    const requestHandler = (req, res) => {
       const requestUrl = new URL(req.url || "/", "http://localhost");
       if (req.method !== "GET") {
         sendPlainResponse(res, 405, "Method not allowed\n", "text/plain; charset=utf-8");
@@ -692,7 +706,7 @@ module.exports = function aisPlusAudio(app) {
         sendPlainResponse(
           res,
           200,
-          `#EXTM3U\n#EXTINF:-1,AIS Plus Audio\nhttp://${host}/live.mp3\n`,
+          `#EXTM3U\n#EXTINF:-1,AIS Plus Audio\n${publicStreamProtocol()}://${host}/live.mp3\n`,
           "audio/x-mpegurl; charset=utf-8",
         );
         return;
@@ -707,13 +721,19 @@ module.exports = function aisPlusAudio(app) {
         return;
       }
       sendPlainResponse(res, 404, "Not found\n", "text/plain; charset=utf-8");
-    });
+    };
+    publicStreamServer = tlsOptions
+      ? https.createServer(tlsOptions, requestHandler)
+      : http.createServer(requestHandler);
     publicStreamServer.on("error", (error) => {
       addRecent("error", `Public stream server failed: ${error.message}`);
       app.error(`[${PLUGIN_ID}] public stream server failed: ${error.stack || error.message}`);
     });
     publicStreamServer.listen(options.publicHttpStreamPort, "0.0.0.0", () => {
-      addRecent("stream-server", `Listening on http://0.0.0.0:${options.publicHttpStreamPort}`);
+      addRecent(
+        "stream-server",
+        `Listening on ${publicStreamProtocol()}://0.0.0.0:${options.publicHttpStreamPort}`,
+      );
     });
   }
 
@@ -721,6 +741,7 @@ module.exports = function aisPlusAudio(app) {
     if (!publicStreamServer) return;
     publicStreamServer.close();
     publicStreamServer = null;
+    publicStreamIsHttps = false;
   }
 
   function sendJsonResponse(res, statusCode, body) {
@@ -732,6 +753,30 @@ module.exports = function aisPlusAudio(app) {
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "no-store");
     res.end(body);
+  }
+
+  function publicStreamTlsOptions() {
+    if (!options.publicStreamUseHttps) return null;
+    const configPath = app.config?.configPath || path.join(os.homedir(), ".signalk");
+    const keyPath = path.join(configPath, "ssl-key.pem");
+    const certPath = path.join(configPath, "ssl-cert.pem");
+    if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+      addRecent("warning", `HTTPS stream disabled: ${keyPath} or ${certPath} not found`);
+      return null;
+    }
+    try {
+      return {
+        key: fs.readFileSync(keyPath),
+        cert: fs.readFileSync(certPath),
+      };
+    } catch (error) {
+      addRecent("warning", `HTTPS stream disabled: ${error.message}`);
+      return null;
+    }
+  }
+
+  function publicStreamProtocol() {
+    return publicStreamIsHttps ? "https" : "http";
   }
 
   function closeLiveStreamClient(client) {
