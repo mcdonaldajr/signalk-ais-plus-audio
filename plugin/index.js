@@ -157,6 +157,15 @@ module.exports = function aisPlusAudio(app) {
         minimum: 1,
         maximum: 100,
       },
+      mp3BitrateKbps: {
+        type: "integer",
+        title: "MP3 stream bitrate (kbit/s)",
+        description:
+          "Lower values reduce Wi-Fi traffic. 64 kbit/s is usually enough for spoken alerts and the directional ping.",
+        default: 64,
+        minimum: 32,
+        maximum: 192,
+      },
       masterVolumePercent: {
         type: "number",
         title: "Master volume (%)",
@@ -320,6 +329,7 @@ module.exports = function aisPlusAudio(app) {
       audioDirectory: String(value.audioDirectory || DEFAULT_AUDIO_DIR),
       maxAudioFiles: clampInteger(value.maxAudioFiles, 1, 200, 30),
       maxQueueLength: clampInteger(value.maxQueueLength, 1, 100, 10),
+      mp3BitrateKbps: clampInteger(value.mp3BitrateKbps, 32, 192, 64),
       masterVolumePercent: normalizePercentValue(value.masterVolumePercent, value.masterVolume, 100, 200),
       speechVolumePercent: normalizePercentValue(value.speechVolumePercent, value.speechVolume, 65, 200),
       pingEnabled: value.pingEnabled !== false,
@@ -564,6 +574,7 @@ module.exports = function aisPlusAudio(app) {
       publicStreamProtocol: publicStreamProtocol(),
       publicStreamUrl: `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.mp3`,
       publicPlaylistUrl: `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.m3u`,
+      mp3BitrateKbps: options.mp3BitrateKbps,
       masterVolumePercent: options.masterVolumePercent,
       speechVolumePercent: options.speechVolumePercent,
       pingVolumePercent: options.pingVolumePercent,
@@ -650,7 +661,7 @@ module.exports = function aisPlusAudio(app) {
       "-codec:a",
       "libmp3lame",
       "-b:a",
-      "128k",
+      `${options.mp3BitrateKbps}k`,
       "-write_id3v1",
       "0",
       "-id3v2_version",
@@ -813,7 +824,7 @@ module.exports = function aisPlusAudio(app) {
   async function ensureLiveSilenceFile() {
     const audioDir = expandHome(options.audioDirectory);
     await fs.promises.mkdir(audioDir, { recursive: true });
-    const silenceFile = path.join(audioDir, "live-silence-1s.mp3");
+    const silenceFile = path.join(audioDir, `live-silence-1s-${options.mp3BitrateKbps}k.mp3`);
     if (fs.existsSync(silenceFile)) {
       liveSilenceFile = silenceFile;
       return silenceFile;
@@ -832,7 +843,7 @@ module.exports = function aisPlusAudio(app) {
       "-codec:a",
       "libmp3lame",
       "-b:a",
-      "128k",
+      `${options.mp3BitrateKbps}k`,
       "-write_id3v1",
       "0",
       "-id3v2_version",
@@ -865,8 +876,8 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function estimateMp3DurationMs(bytes) {
-    const bytesPerSecondAt128k = 16000;
-    return Math.max(1200, Math.min(30000, Math.round((bytes / bytesPerSecondAt128k) * 1000)));
+    const bytesPerSecond = Math.max(1, (options.mp3BitrateKbps * 1000) / 8);
+    return Math.max(1200, Math.min(30000, Math.round((bytes / bytesPerSecond) * 1000)));
   }
 
   function absolutePluginUrl(req, pluginPath) {
@@ -1017,7 +1028,7 @@ module.exports = function aisPlusAudio(app) {
       .then((files) =>
         Promise.all(
           files
-            .filter((file) => file.endsWith(".mp3") && file !== "live-silence-1s.mp3")
+            .filter((file) => file.endsWith(".mp3") && !file.startsWith("live-silence-1s-"))
             .map(async (file) => {
               const fullPath = path.join(audioDir, file);
               const stat = await fs.promises.stat(fullPath);

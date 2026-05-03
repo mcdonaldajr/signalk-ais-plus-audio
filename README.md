@@ -16,7 +16,7 @@ AIS Plus announcement event
 
 ## Current State
 
-Version `0.3.2` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, can play the combined WAV locally on the Signal K server, and exposes a continuous radio-style MP3 stream for native player apps.
+Version `0.3.3` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, can play the combined WAV locally on the Signal K server, and exposes a continuous radio-style MP3 stream for native player apps.
 
 Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
 
@@ -26,7 +26,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.3.2 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.3.3 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
@@ -71,13 +71,15 @@ If the app asks for a playlist rather than a direct stream, use `https://nemo3.l
 
 The stream is unicast, not broadcast. Each connected radio app opens one direct TCP/TLS connection to the Pi. It is therefore limited to the network path between that device and the Pi when the device is connected to the boat Wi-Fi.
 
-At the current 128 kbit/s MP3 stream rate, allow roughly:
+At the default 64 kbit/s MP3 stream rate, allow roughly:
 
 ```text
-16 KB/s per connected player
-58 MB/hour per connected player
-1.4 GB/day per connected player if left running continuously
+8 KB/s per connected player
+29 MB/hour per connected player
+700 MB/day per connected player if left running continuously
 ```
+
+The bitrate is configurable in the Signal K plugin settings as **MP3 stream bitrate (kbit/s)**.
 
 This traffic should stay on the local boat LAN when the stream URL uses the local hostname `nemo3.local`. It should not use the boat router's cellular data unless the phone is no longer on the boat Wi-Fi, the hostname is being resolved through a remote/VPN route, or the router is configured to hairpin local traffic through an internet service.
 
