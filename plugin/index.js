@@ -22,6 +22,9 @@ module.exports = function aisPlusAudio(app) {
   let liveStreamPauseUntil = 0;
   let publicStreamServer = null;
   let publicStreamIsHttps = false;
+  let streamHealthTimer = null;
+  let lastRealAnnouncementAt = 0;
+  let lastStreamHealthAt = 0;
   const liveStreamClients = new Set();
   let droppedLaggingClients = 0;
   let stats = {
@@ -41,6 +44,7 @@ module.exports = function aisPlusAudio(app) {
     options = normalizeOptions(pluginOptions);
     ensureAudioDirectory();
     startPublicStreamServer();
+    startStreamHealthTimer();
     subscribeToAisPlusAnnouncements();
     app.setPluginStatus(`Started v${packageInfo.version}`);
   };
@@ -61,6 +65,7 @@ module.exports = function aisPlusAudio(app) {
       closeLiveStreamClient(client);
     }
     stopPublicStreamServer();
+    stopStreamHealthTimer();
   };
 
   plugin.schema = {
@@ -175,6 +180,20 @@ module.exports = function aisPlusAudio(app) {
         default: 30,
         minimum: 5,
         maximum: 300,
+      },
+      streamHealthTimeCheck: {
+        type: "boolean",
+        title: "Announce time on live stream",
+        description:
+          "Periodically speaks the server time to the live stream so you can detect player buffering drift.",
+        default: false,
+      },
+      streamHealthIntervalMinutes: {
+        type: "integer",
+        title: "Live stream time-check interval (minutes)",
+        default: 15,
+        minimum: 1,
+        maximum: 120,
       },
       masterVolumePercent: {
         type: "number",
@@ -311,6 +330,12 @@ module.exports = function aisPlusAudio(app) {
       res.json({ ok: true, restarted: count });
     });
 
+    router.post("/stream-time-check", (_req, res) => {
+      const entry = createStreamTimeCheckAnnouncement(true);
+      enqueue(entry);
+      res.json({ ok: true, announcement: entry });
+    });
+
     router.post("/repeat-last", (_req, res) => {
       if (!lastAnnouncement) {
         res.status(404).json({ error: "No announcement has been received yet." });
@@ -346,6 +371,8 @@ module.exports = function aisPlusAudio(app) {
       maxQueueLength: clampInteger(value.maxQueueLength, 1, 100, 10),
       mp3BitrateKbps: clampInteger(value.mp3BitrateKbps, 32, 192, 64),
       maxStreamLagSeconds: clampInteger(value.maxStreamLagSeconds, 5, 300, 30),
+      streamHealthTimeCheck: value.streamHealthTimeCheck === true,
+      streamHealthIntervalMinutes: clampInteger(value.streamHealthIntervalMinutes, 1, 120, 15),
       masterVolumePercent: normalizePercentValue(value.masterVolumePercent, value.masterVolume, 100, 200),
       speechVolumePercent: normalizePercentValue(value.speechVolumePercent, value.speechVolume, 65, 200),
       pingEnabled: value.pingEnabled !== false,
@@ -477,6 +504,9 @@ module.exports = function aisPlusAudio(app) {
     try {
       const rendered = await renderAnnouncement(active);
       lastAnnouncement = rendered;
+      if (rendered.category !== "stream-health") {
+        lastRealAnnouncementAt = Date.now();
+      }
       stats.rendered += 1;
       addRecent("rendered", rendered.message);
     } catch (error) {
@@ -532,7 +562,7 @@ module.exports = function aisPlusAudio(app) {
       await cleanupGeneratedAudio();
       await broadcastMp3ToLiveStream(mp3File);
 
-      if (options.localPlayback && !options.muted) {
+      if (!entry.streamOnly && options.localPlayback && !options.muted) {
         await playLocalWav(combinedWav);
       }
 
@@ -562,6 +592,7 @@ module.exports = function aisPlusAudio(app) {
       message: String(value.message || "").trim(),
       sourcePath: String(value.sourcePath || ""),
       force: value.force === true,
+      streamOnly: value.streamOnly === true,
     };
   }
 
@@ -593,6 +624,8 @@ module.exports = function aisPlusAudio(app) {
       mp3BitrateKbps: options.mp3BitrateKbps,
       maxStreamLagSeconds: options.maxStreamLagSeconds,
       maxStreamBufferBytes: maxStreamBufferBytes(),
+      streamHealthTimeCheck: options.streamHealthTimeCheck,
+      streamHealthIntervalMinutes: options.streamHealthIntervalMinutes,
       masterVolumePercent: options.masterVolumePercent,
       speechVolumePercent: options.speechVolumePercent,
       pingVolumePercent: options.pingVolumePercent,
@@ -931,6 +964,45 @@ module.exports = function aisPlusAudio(app) {
     }
     addRecent("stream-restart", `${clients.length} live stream client(s) restarted: ${reason}`);
     return clients.length;
+  }
+
+  function startStreamHealthTimer() {
+    stopStreamHealthTimer();
+    streamHealthTimer = setInterval(() => {
+      if (!options.streamHealthTimeCheck || !liveStreamClients.size) return;
+      const intervalMs = options.streamHealthIntervalMinutes * 60 * 1000;
+      const lastAudioAt = Math.max(lastRealAnnouncementAt, lastStreamHealthAt);
+      if (lastAudioAt && Date.now() - lastAudioAt < intervalMs) return;
+      enqueue(createStreamTimeCheckAnnouncement(false));
+    }, 30 * 1000);
+  }
+
+  function stopStreamHealthTimer() {
+    if (streamHealthTimer) {
+      clearInterval(streamHealthTimer);
+      streamHealthTimer = null;
+    }
+  }
+
+  function createStreamTimeCheckAnnouncement(force) {
+    const now = new Date();
+    lastStreamHealthAt = now.getTime();
+    const time = now.toLocaleTimeString("en-GB", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    return normalizeAnnouncement({
+      id: `stream-time-check-${Date.now()}`,
+      ts: now.toISOString(),
+      severity: "alert",
+      category: "stream-health",
+      vesselName: "AIS Plus Audio",
+      message: `AIS Plus Audio time check. Server time is ${time}.`,
+      force,
+      streamOnly: true,
+    });
   }
 
   function absolutePluginUrl(req, pluginPath) {

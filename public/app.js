@@ -14,6 +14,7 @@ document.getElementById("buttonSoundCheck").addEventListener("click", () => post
 document.getElementById("buttonRepeatLast").addEventListener("click", () => postJson("repeat-last"));
 document.getElementById("buttonClearQueue").addEventListener("click", () => postJson("clear-queue"));
 document.getElementById("buttonRestartStreams").addEventListener("click", () => postJson("restart-streams"));
+document.getElementById("buttonStreamTimeCheck").addEventListener("click", () => postJson("stream-time-check"));
 
 refresh();
 setInterval(refresh, 2000);
