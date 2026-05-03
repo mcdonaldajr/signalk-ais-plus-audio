@@ -3,6 +3,7 @@ const queueLength = document.getElementById("queueLength");
 const renderedCount = document.getElementById("renderedCount");
 const filteredCount = document.getElementById("filteredCount");
 const lastAnnouncement = document.getElementById("lastAnnouncement");
+const lastAudio = document.getElementById("lastAudio");
 const audioDirectory = document.getElementById("audioDirectory");
 const events = document.getElementById("events");
 
@@ -57,9 +58,20 @@ function renderStatus(status) {
   if (status.lastAnnouncement?.message) {
     lastAnnouncement.classList.remove("muted");
     lastAnnouncement.textContent = status.lastAnnouncement.message;
+    if (status.lastAnnouncement.audioUrl) {
+      lastAudio.hidden = false;
+      if (lastAudio.getAttribute("src") !== status.lastAnnouncement.audioUrl) {
+        lastAudio.setAttribute("src", status.lastAnnouncement.audioUrl);
+      }
+    } else {
+      lastAudio.hidden = true;
+      lastAudio.removeAttribute("src");
+    }
   } else {
     lastAnnouncement.classList.add("muted");
     lastAnnouncement.textContent = "No announcement received yet.";
+    lastAudio.hidden = true;
+    lastAudio.removeAttribute("src");
   }
 
   renderEvents(status.recentEvents || []);

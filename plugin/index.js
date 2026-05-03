@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const packageInfo = require("../package.json");
 
 const PLUGIN_ID = "signalk-ais-plus-audio";
@@ -182,6 +183,22 @@ module.exports = function aisPlusAudio(app) {
       res.json(buildStatus());
     });
 
+    router.get("/audio/:file", (req, res) => {
+      const file = path.basename(req.params.file || "");
+      if (!file.endsWith(".mp3")) {
+        res.status(404).json({ error: "Audio file not found." });
+        return;
+      }
+      const filePath = path.join(expandHome(options.audioDirectory), file);
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ error: "Audio file not found." });
+        return;
+      }
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Cache-Control", "no-store");
+      fs.createReadStream(filePath).pipe(res);
+    });
+
     router.post("/sound-check", (_req, res) => {
       const entry = normalizeAnnouncement({
         id: `sound-check-${Date.now()}`,
@@ -189,6 +206,8 @@ module.exports = function aisPlusAudio(app) {
         severity: "alert",
         category: "test",
         vesselName: "AIS Plus Audio",
+        clock: 12,
+        sizeCategory: "medium",
         message: "Sound Check. Testing 1, 2, 3.",
         force: true,
       });
@@ -324,6 +343,9 @@ module.exports = function aisPlusAudio(app) {
         vesselName: alertEvent.vesselName || value?.data?.vesselName || "",
         severity: alertEvent.state || value?.state || value?.data?.alarmState || "alert",
         category: alertEvent.category || value?.data?.category || "cpa",
+        clock: alertEvent.clock || announcement.clock || value?.data?.relativeClock,
+        sizeCategory:
+          alertEvent.sizeCategory || announcement.sizeCategory || value?.data?.sizeCategory,
         message,
         sourcePath: pathName,
       }),
@@ -357,9 +379,10 @@ module.exports = function aisPlusAudio(app) {
     if (active || queue.length === 0) return;
     active = queue.shift();
     try {
-      await renderPlaceholder(active);
+      const rendered = await renderAnnouncement(active);
+      lastAnnouncement = rendered;
       stats.rendered += 1;
-      addRecent("rendered", active.message);
+      addRecent("rendered", rendered.message);
     } catch (error) {
       stats.failed += 1;
       addRecent("error", `Render failed: ${error.message}`);
@@ -370,12 +393,56 @@ module.exports = function aisPlusAudio(app) {
     }
   }
 
-  async function renderPlaceholder(entry) {
-    // The next implementation step replaces this metadata file with:
-    // Piper WAV -> stereo ping mix -> stereo MP3 -> published audio URL.
-    const fileName = `${safeFileSegment(entry.id)}.json`;
-    const filePath = path.join(expandHome(options.audioDirectory), fileName);
-    await fs.promises.writeFile(filePath, `${JSON.stringify(entry, null, 2)}\n`);
+  async function renderAnnouncement(entry) {
+    const audioDir = expandHome(options.audioDirectory);
+    await fs.promises.mkdir(audioDir, { recursive: true });
+
+    const baseName = safeFileSegment(entry.id || `announcement-${Date.now()}`);
+    const tempBase = path.join(os.tmpdir(), `${PLUGIN_ID}-${baseName}-${Date.now()}`);
+    const speechWav = `${tempBase}-speech.wav`;
+    const pingWav = `${tempBase}-ping.wav`;
+    const combinedWav = `${tempBase}-combined.wav`;
+    const mp3FileName = `${baseName}.mp3`;
+    const mp3File = path.join(audioDir, mp3FileName);
+    const metadataFile = path.join(audioDir, `${baseName}.json`);
+
+    try {
+      await synthesizePiperWav(formatMessageForSpeech(entry.message), speechWav);
+      const clock = extractClockPosition(entry);
+      const shouldPing = options.pingEnabled && clock != null;
+      if (shouldPing) {
+        await fs.promises.writeFile(
+          pingWav,
+          createPingWav(clock, extractVesselSize(entry), pingCountForClock(clock)),
+        );
+      }
+
+      await createCombinedWav({
+        speechWav,
+        pingWav: shouldPing ? pingWav : null,
+        combinedWav,
+      });
+      await createMp3(combinedWav, mp3File);
+
+      const rendered = {
+        ...entry,
+        audioUrl: `/plugins/${PLUGIN_ID}/audio/${mp3FileName}`,
+        audioFile: mp3FileName,
+        renderedAt: new Date().toISOString(),
+      };
+      await fs.promises.writeFile(metadataFile, `${JSON.stringify(rendered, null, 2)}\n`);
+      await cleanupGeneratedAudio();
+
+      if (options.localPlayback && !options.muted) {
+        await playLocalWav(combinedWav);
+      }
+
+      return rendered;
+    } finally {
+      for (const file of [speechWav, pingWav, combinedWav]) {
+        fs.rm(file, { force: true }, () => {});
+      }
+    }
   }
 
   function normalizeAnnouncement(value) {
@@ -391,6 +458,8 @@ module.exports = function aisPlusAudio(app) {
       vesselName: String(value.vesselName || ""),
       severity: String(value.severity || "alert"),
       category: String(value.category || "cpa"),
+      clock: normalizeClock(value.clock),
+      sizeCategory: normalizeSizeCategory(value.sizeCategory),
       message: String(value.message || "").trim(),
       sourcePath: String(value.sourcePath || ""),
       force: value.force === true,
@@ -439,6 +508,229 @@ module.exports = function aisPlusAudio(app) {
     }
   }
 
+  function selectedVoice() {
+    const voices = listVoices();
+    if (!voices.length) return null;
+    return (
+      voices.find((voice) => voice.selected) ||
+      voices.find((voice) => `${voice.id}.onnx` === options.voice) ||
+      voices[0]
+    );
+  }
+
+  function synthesizePiperWav(message, outputFile) {
+    const voice = selectedVoice();
+    if (!voice) {
+      throw new Error(`No Piper voices found in ${expandHome(options.voicesDir)}`);
+    }
+    return runProcess(
+      options.piperBinary,
+      ["--model", voice.file, "--output_file", outputFile],
+      `${message}\n`,
+    );
+  }
+
+  function createCombinedWav({ speechWav, pingWav, combinedWav }) {
+    const masterVolume = safeFfmpegNumber(options.masterVolume);
+    const speechVolume = safeFfmpegNumber(options.speechVolume);
+    const filter = pingWav
+      ? `[0:a]aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=stereo[p];[1:a]aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=stereo,volume=${speechVolume}[s];[p][s]concat=n=2:v=0:a=1,volume=${masterVolume}[out]`
+      : `[0:a]aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=stereo,volume=${speechVolume * masterVolume}[out]`;
+    const inputs = pingWav ? ["-i", pingWav, "-i", speechWav] : ["-i", speechWav];
+    return runProcess(options.ffmpegBinary, [
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      ...inputs,
+      "-filter_complex",
+      filter,
+      "-map",
+      "[out]",
+      "-c:a",
+      "pcm_s16le",
+      combinedWav,
+    ]);
+  }
+
+  function createMp3(inputWav, outputMp3) {
+    return runProcess(options.ffmpegBinary, [
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      inputWav,
+      "-codec:a",
+      "libmp3lame",
+      "-b:a",
+      "128k",
+      outputMp3,
+    ]);
+  }
+
+  function playLocalWav(file) {
+    return runProcess(options.audioPlayer, [file]);
+  }
+
+  function runProcess(command, args, stdin = null) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(command, args, { stdio: ["pipe", "ignore", "pipe"] });
+      let stderr = "";
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
+        }
+      });
+      child.stdin.end(stdin || "");
+    });
+  }
+
+  function createPingWav(clock, size = "", pingCount = 1) {
+    const sampleRate = 44100;
+    const channels = 2;
+    const bytesPerSample = 2;
+    const toneSamples = Math.max(1, Math.round((sampleRate * 180) / 1000));
+    const gapSamples = pingCount > 1 ? Math.max(0, Math.round((sampleRate * 90) / 1000)) : 0;
+    const durationSamples = toneSamples * pingCount + gapSamples * (pingCount - 1);
+    const dataSize = durationSamples * channels * bytesPerSample;
+    const buffer = Buffer.alloc(44 + dataSize);
+    const pan = clockToPan(clock);
+    const leftGain = Math.cos(((pan + 1) * Math.PI) / 4);
+    const rightGain = Math.sin(((pan + 1) * Math.PI) / 4);
+    const amplitude = Math.round(32767 * options.pingVolume);
+    const frequency = pingFrequencyForSize(size);
+
+    buffer.write("RIFF", 0);
+    buffer.writeUInt32LE(36 + dataSize, 4);
+    buffer.write("WAVE", 8);
+    buffer.write("fmt ", 12);
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20);
+    buffer.writeUInt16LE(channels, 22);
+    buffer.writeUInt32LE(sampleRate, 24);
+    buffer.writeUInt32LE(sampleRate * channels * bytesPerSample, 28);
+    buffer.writeUInt16LE(channels * bytesPerSample, 32);
+    buffer.writeUInt16LE(bytesPerSample * 8, 34);
+    buffer.write("data", 36);
+    buffer.writeUInt32LE(dataSize, 40);
+
+    for (let i = 0; i < durationSamples; i += 1) {
+      const cycleSamples = toneSamples + gapSamples;
+      const cycleOffset = cycleSamples > 0 ? i % cycleSamples : i;
+      const inTone = cycleOffset < toneSamples;
+      const progress = inTone ? cycleOffset / toneSamples : 0;
+      const t = cycleOffset / sampleRate;
+      const attack = inTone ? Math.min(1, cycleOffset / (sampleRate * 0.012)) : 0;
+      const decay = inTone ? Math.exp(-5.2 * progress) : 0;
+      const fadeOut = inTone ? Math.min(1, (toneSamples - cycleOffset) / (sampleRate * 0.025)) : 0;
+      const envelope = attack * decay * fadeOut;
+      const sweptFrequency = frequency * (1 - (1 - 0.72) * progress);
+      const phase = 2 * Math.PI * sweptFrequency * t;
+      const tone = inTone ? Math.sin(phase) + 0.18 * Math.sin(phase * 2.01) : 0;
+      const sample = amplitude * tone * Math.max(0, envelope);
+      const offset = 44 + i * channels * bytesPerSample;
+      buffer.writeInt16LE(clampPcm16(sample * leftGain), offset);
+      buffer.writeInt16LE(clampPcm16(sample * rightGain), offset + 2);
+    }
+
+    return buffer;
+  }
+
+  function pingFrequencyForSize(size) {
+    if (size === "large") return options.pingLargeFrequencyHz;
+    if (size === "medium") return options.pingMediumFrequencyHz;
+    return options.pingSmallFrequencyHz;
+  }
+
+  function pingCountForClock(clock) {
+    return clock >= 10 || clock <= 2 ? 1 : 2;
+  }
+
+  function clockToPan(clock) {
+    const angle = ((clock % 12) / 12) * Math.PI * 2;
+    return Math.max(-1, Math.min(1, Math.sin(angle)));
+  }
+
+  function extractClockPosition(entry) {
+    const direct = normalizeClock(entry?.clock ?? entry?.relativeClock);
+    if (direct != null) return direct;
+    const match = String(entry?.message || "").match(/\bat\s+([1-9]|1[0-2])\s+o'?clock\b/i);
+    return match ? Number(match[1]) : null;
+  }
+
+  function extractVesselSize(entry) {
+    const direct = normalizeSizeCategory(entry?.sizeCategory);
+    if (direct) return direct;
+    const message = String(entry?.message || "").toLowerCase();
+    if (message.includes("large vessel")) return "large";
+    if (message.includes("medium vessel")) return "medium";
+    return "small";
+  }
+
+  function normalizeClock(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 1 || number > 12) return null;
+    return Math.round(number);
+  }
+
+  function normalizeSizeCategory(value) {
+    const clean = String(value || "").toLowerCase();
+    return ["small", "medium", "large"].includes(clean) ? clean : "";
+  }
+
+  function formatMessageForSpeech(message) {
+    return String(message || "").replace(
+      /\b((?:fast\s+)?(?:large vessel|medium vessel|small craft|small vessel|vessel)\s+)(.+?)(\s+at\s+(?:[1-9]|1[0-2])\s+o'?clock\b)/gi,
+      (_match, prefix, vesselName, suffix) =>
+        `${prefix}${formatVesselNameForSpeech(vesselName)}${suffix}`,
+    );
+  }
+
+  function formatVesselNameForSpeech(name) {
+    const clean = String(name || "").trim();
+    const letters = clean.match(/[A-Za-z]/g) || [];
+    const uppercaseLetters = clean.match(/[A-Z]/g) || [];
+    if (letters.length < 2 || uppercaseLetters.length / letters.length < 0.8) {
+      return clean;
+    }
+    return clean.toLowerCase().replace(/\b([a-z])/g, (match) => match.toUpperCase());
+  }
+
+  function cleanupGeneratedAudio() {
+    const audioDir = expandHome(options.audioDirectory);
+    return fs.promises
+      .readdir(audioDir)
+      .then((files) =>
+        Promise.all(
+          files
+            .filter((file) => file.endsWith(".mp3"))
+            .map(async (file) => {
+              const fullPath = path.join(audioDir, file);
+              const stat = await fs.promises.stat(fullPath);
+              return { fullPath, mtimeMs: stat.mtimeMs };
+            }),
+        ),
+      )
+      .then((files) =>
+        Promise.all(
+          files
+            .sort((a, b) => b.mtimeMs - a.mtimeMs)
+            .slice(options.maxAudioFiles)
+            .flatMap((item) => [
+              fs.promises.rm(item.fullPath, { force: true }),
+              fs.promises.rm(item.fullPath.replace(/\.mp3$/, ".json"), { force: true }),
+            ]),
+        ),
+      );
+  }
+
   function ensureAudioDirectory() {
     fs.mkdirSync(expandHome(options.audioDirectory), { recursive: true });
   }
@@ -472,6 +764,15 @@ module.exports = function aisPlusAudio(app) {
       .replace(/[^a-z0-9_.-]+/gi, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 120);
+  }
+
+  function safeFfmpegNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 1;
+  }
+
+  function clampPcm16(value) {
+    return Math.max(-32768, Math.min(32767, Math.round(value)));
   }
 
   function clampInteger(value, min, max, fallback) {

@@ -134,6 +134,11 @@ dd {
   line-height: 1.45;
 }
 
+.audio-player {
+  margin-top: 12px;
+  width: 100%;
+}
+
 .muted {
   color: #94a3b8;
 }

@@ -16,15 +16,15 @@ AIS Plus announcement event
 
 ## Current State
 
-Version `0.1.0` is the architecture scaffold. It subscribes to AIS Plus `notifications.collision.*` sound notifications, queues announcement events, exposes a status page, and writes placeholder render metadata to the configured audio directory.
+Version `0.2.0` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, and can play the combined WAV locally on the Signal K server.
 
-The next implementation step is replacing the placeholder renderer with Piper WAV generation, stereo ping mixing, MP3 output, and announcement URLs for AIS Plus Companion.
+The next implementation step is updating AIS Plus Companion to subscribe to the rendered announcement output and play these MP3 files on iPhone, iPad, Android, and desktop browsers.
 
 ## Install
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.1.0 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.2.0 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
@@ -38,6 +38,6 @@ Open **AIS Plus Audio** from the Signal K webapps page.
 
 ## Notes
 
-- Keep this plugin disabled until the renderer is complete.
+- Requires Piper and FFmpeg on the Signal K server.
 - Generated audio must be treated as time-limited; stale collision warnings should not auto-play.
 - The Pi remains the only place that needs Piper installed.

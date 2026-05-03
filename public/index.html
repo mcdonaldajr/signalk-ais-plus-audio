@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AIS Plus Audio</title>
-    <link rel="stylesheet" href="./styles.css?v=0.1.0" />
-    <script defer src="./app.js?v=0.1.0"></script>
+    <link rel="stylesheet" href="./styles.css?v=0.2.0" />
+    <script defer src="./app.js?v=0.2.0"></script>
   </head>
   <body>
     <main>
@@ -43,14 +43,15 @@
       <section class="panel">
         <h2>Last announcement</h2>
         <p id="lastAnnouncement" class="message muted">No announcement received yet.</p>
+        <audio id="lastAudio" class="audio-player" controls hidden></audio>
       </section>
 
       <section class="panel">
         <h2>Renderer</h2>
         <p class="muted">
-          This first version subscribes to AIS Plus sound notifications and records
-          the render queue. The next step is Piper WAV, stereo ping mixing, MP3
-          serving, and Companion playback.
+          This version renders Piper speech, adds the stereo directional ping,
+          creates a browser-friendly MP3, and can play the combined WAV locally
+          on the Signal K server.
         </p>
         <p class="path" id="audioDirectory"></p>
       </section>
