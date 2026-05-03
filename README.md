@@ -16,27 +16,50 @@ AIS Plus announcement event
 
 ## Current State
 
-Version `0.2.3` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, and can play the combined WAV locally on the Signal K server.
+Version `0.3.0` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, can play the combined WAV locally on the Signal K server, and exposes a continuous radio-style MP3 stream for native player apps.
 
 Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
 
-The next implementation step is updating AIS Plus Companion to subscribe to the rendered announcement output and play these MP3 files on iPhone, iPad, Android, and desktop browsers.
+The radio stream is intended for iPhone/iPad/Android apps that can keep a stream alive while the device is locked.
 
 ## Install
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.2.3 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.3.0 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
 Open **AIS Plus Audio** from the Signal K webapps page.
 
+## Radio Stream
+
+Use this URL in a radio player app:
+
+```text
+https://nemo3.local:3443/plugins/signalk-ais-plus-audio/live.mp3
+```
+
+Station name:
+
+```text
+AIS Plus Audio
+```
+
+Some apps prefer an M3U playlist:
+
+```text
+https://nemo3.local:3443/plugins/signalk-ais-plus-audio/live.m3u
+```
+
+The stream sends silence between announcements and writes each rendered AIS Plus announcement into the stream as it is produced.
+
 ## Responsibilities
 
 - AIS Plus decides whether an announcement is required.
 - AIS Plus Audio renders and serves the audio.
-- AIS Plus Companion plays the rendered audio on iPhone, iPad, Android, or desktop browsers.
+- AIS Plus Companion can play the rendered audio while open.
+- A native radio player can play the live stream while the phone or tablet is locked.
 
 ## Notes
 

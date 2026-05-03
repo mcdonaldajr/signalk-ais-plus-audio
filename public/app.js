@@ -2,9 +2,11 @@ const statusPill = document.getElementById("statusPill");
 const queueLength = document.getElementById("queueLength");
 const renderedCount = document.getElementById("renderedCount");
 const filteredCount = document.getElementById("filteredCount");
+const streamCount = document.getElementById("streamCount");
 const lastAnnouncement = document.getElementById("lastAnnouncement");
 const lastAudio = document.getElementById("lastAudio");
 const audioDirectory = document.getElementById("audioDirectory");
+const streamUrl = document.getElementById("streamUrl");
 const events = document.getElementById("events");
 
 document.getElementById("buttonSoundCheck").addEventListener("click", () => postJson("sound-check"));
@@ -53,7 +55,9 @@ function renderStatus(status) {
   queueLength.textContent = status.queueLength ?? 0;
   renderedCount.textContent = status.stats?.rendered ?? 0;
   filteredCount.textContent = status.stats?.filtered ?? 0;
+  streamCount.textContent = status.liveStreamClients ?? 0;
   audioDirectory.textContent = status.audioDirectory || "";
+  streamUrl.textContent = `${window.location.origin}${status.streamUrl || "/plugins/signalk-ais-plus-audio/live.mp3"}`;
 
   if (status.lastAnnouncement?.message) {
     lastAnnouncement.classList.remove("muted");

@@ -15,6 +15,10 @@ module.exports = function aisPlusAudio(app) {
   let active = null;
   let lastAnnouncement = null;
   let recentEvents = [];
+  let liveSilenceTimer = null;
+  let liveSilenceFile = null;
+  let liveStreamPauseUntil = 0;
+  const liveStreamClients = new Set();
   let stats = {
     received: 0,
     queued: 0,
@@ -46,6 +50,10 @@ module.exports = function aisPlusAudio(app) {
     unsubscribes = [];
     queue = [];
     active = null;
+    stopLiveStreamSilence();
+    for (const client of Array.from(liveStreamClients)) {
+      closeLiveStreamClient(client);
+    }
   };
 
   plugin.schema = {
@@ -66,6 +74,13 @@ module.exports = function aisPlusAudio(app) {
         title: "Play rendered audio on this Signal K server",
         description:
           "When enabled, the Pi will play the same rendered announcement audio that browser clients can fetch.",
+        default: true,
+      },
+      liveStream: {
+        type: "boolean",
+        title: "Enable radio-style MP3 stream",
+        description:
+          "Serves a continuous stream for radio player apps that can keep playing while a phone is locked.",
         default: true,
       },
       piperBinary: {
@@ -183,6 +198,30 @@ module.exports = function aisPlusAudio(app) {
       res.json(buildStatus());
     });
 
+    router.get("/live.mp3", async (_req, res) => {
+      if (!options.liveStream) {
+        res.status(404).json({ error: "Live stream is disabled." });
+        return;
+      }
+      try {
+        await addLiveStreamClient(res);
+      } catch (error) {
+        addRecent("error", `Live stream failed: ${error.message}`);
+        if (!res.headersSent) {
+          res.status(500).json({ error: error.message });
+        } else {
+          res.end();
+        }
+      }
+    });
+
+    router.get("/live.m3u", (req, res) => {
+      const streamUrl = absolutePluginUrl(req, "/live.mp3");
+      res.setHeader("Content-Type", "audio/x-mpegurl; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      res.send(`#EXTM3U\n#EXTINF:-1,AIS Plus Audio\n${streamUrl}\n`);
+    });
+
     router.get("/audio/:file", (req, res) => {
       const file = path.basename(req.params.file || "");
       if (!file.endsWith(".mp3")) {
@@ -242,6 +281,7 @@ module.exports = function aisPlusAudio(app) {
       enabled: value.enabled !== false,
       muted: value.muted === true,
       localPlayback: value.localPlayback !== false,
+      liveStream: value.liveStream !== false,
       piperBinary: expandHome(String(value.piperBinary || "piper")),
       ffmpegBinary: expandHome(String(value.ffmpegBinary || "ffmpeg")),
       audioPlayer: expandHome(String(value.audioPlayer || "aplay")),
@@ -427,11 +467,14 @@ module.exports = function aisPlusAudio(app) {
       const rendered = {
         ...entry,
         audioUrl: `/plugins/${PLUGIN_ID}/audio/${mp3FileName}`,
+        streamUrl: `/plugins/${PLUGIN_ID}/live.mp3`,
+        playlistUrl: `/plugins/${PLUGIN_ID}/live.m3u`,
         audioFile: mp3FileName,
         renderedAt: new Date().toISOString(),
       };
       await fs.promises.writeFile(metadataFile, `${JSON.stringify(rendered, null, 2)}\n`);
       await cleanupGeneratedAudio();
+      await broadcastMp3ToLiveStream(mp3File);
 
       if (options.localPlayback && !options.muted) {
         await playLocalWav(combinedWav);
@@ -481,6 +524,10 @@ module.exports = function aisPlusAudio(app) {
       enabled: options.enabled,
       muted: options.muted,
       localPlayback: options.localPlayback,
+      liveStream: options.liveStream,
+      liveStreamClients: liveStreamClients.size,
+      streamUrl: `/plugins/${PLUGIN_ID}/live.mp3`,
+      playlistUrl: `/plugins/${PLUGIN_ID}/live.m3u`,
       masterVolumePercent: options.masterVolumePercent,
       speechVolumePercent: options.speechVolumePercent,
       pingVolumePercent: options.pingVolumePercent,
@@ -568,8 +615,126 @@ module.exports = function aisPlusAudio(app) {
       "libmp3lame",
       "-b:a",
       "128k",
+      "-write_id3v1",
+      "0",
+      "-id3v2_version",
+      "0",
       outputMp3,
     ]);
+  }
+
+  async function addLiveStreamClient(res) {
+    await ensureLiveSilenceFile();
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+
+    const client = { res, connectedAt: Date.now() };
+    liveStreamClients.add(client);
+    addRecent("stream-connected", `${liveStreamClients.size} live stream client(s)`);
+    res.on("close", () => closeLiveStreamClient(client));
+
+    await writeFileToLiveClient(client, liveSilenceFile);
+    startLiveStreamSilence();
+  }
+
+  function closeLiveStreamClient(client) {
+    if (!liveStreamClients.has(client)) return;
+    liveStreamClients.delete(client);
+    try {
+      client.res.end();
+    } catch {
+      // Client has already gone away.
+    }
+    addRecent("stream-disconnected", `${liveStreamClients.size} live stream client(s)`);
+    if (liveStreamClients.size === 0) {
+      stopLiveStreamSilence();
+    }
+  }
+
+  function startLiveStreamSilence() {
+    if (liveSilenceTimer) return;
+    liveSilenceTimer = setInterval(() => {
+      if (!liveStreamClients.size || Date.now() < liveStreamPauseUntil || !liveSilenceFile) return;
+      for (const client of Array.from(liveStreamClients)) {
+        writeFileToLiveClient(client, liveSilenceFile).catch(() => closeLiveStreamClient(client));
+      }
+    }, 1000);
+  }
+
+  function stopLiveStreamSilence() {
+    if (liveSilenceTimer) {
+      clearInterval(liveSilenceTimer);
+      liveSilenceTimer = null;
+    }
+  }
+
+  async function ensureLiveSilenceFile() {
+    const audioDir = expandHome(options.audioDirectory);
+    await fs.promises.mkdir(audioDir, { recursive: true });
+    const silenceFile = path.join(audioDir, "live-silence-1s.mp3");
+    if (fs.existsSync(silenceFile)) {
+      liveSilenceFile = silenceFile;
+      return silenceFile;
+    }
+    await runProcess(options.ffmpegBinary, [
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "anullsrc=r=44100:cl=stereo",
+      "-t",
+      "1",
+      "-codec:a",
+      "libmp3lame",
+      "-b:a",
+      "128k",
+      "-write_id3v1",
+      "0",
+      "-id3v2_version",
+      "0",
+      silenceFile,
+    ]);
+    liveSilenceFile = silenceFile;
+    return silenceFile;
+  }
+
+  async function broadcastMp3ToLiveStream(mp3File) {
+    if (!options.liveStream || liveStreamClients.size === 0 || !fs.existsSync(mp3File)) return;
+    const stat = await fs.promises.stat(mp3File);
+    liveStreamPauseUntil = Date.now() + estimateMp3DurationMs(stat.size) + 600;
+    for (const client of Array.from(liveStreamClients)) {
+      writeFileToLiveClient(client, mp3File).catch(() => closeLiveStreamClient(client));
+    }
+    addRecent("streamed", `Streamed announcement to ${liveStreamClients.size} client(s)`);
+  }
+
+  async function writeFileToLiveClient(client, file) {
+    if (!client?.res || client.res.destroyed || client.res.writableEnded) {
+      closeLiveStreamClient(client);
+      return;
+    }
+    const buffer = await fs.promises.readFile(file);
+    await new Promise((resolve, reject) => {
+      client.res.write(buffer, (error) => (error ? reject(error) : resolve()));
+    });
+  }
+
+  function estimateMp3DurationMs(bytes) {
+    const bytesPerSecondAt128k = 16000;
+    return Math.max(1200, Math.min(30000, Math.round((bytes / bytesPerSecondAt128k) * 1000)));
+  }
+
+  function absolutePluginUrl(req, pluginPath) {
+    const host = req.get?.("host") || "localhost";
+    const forwardedProto = req.get?.("x-forwarded-proto");
+    const protocol = forwardedProto || req.protocol || "https";
+    return `${protocol}://${host}/plugins/${PLUGIN_ID}${pluginPath}`;
   }
 
   function playLocalWav(file) {
@@ -713,7 +878,7 @@ module.exports = function aisPlusAudio(app) {
       .then((files) =>
         Promise.all(
           files
-            .filter((file) => file.endsWith(".mp3"))
+            .filter((file) => file.endsWith(".mp3") && file !== "live-silence-1s.mp3")
             .map(async (file) => {
               const fullPath = path.join(audioDir, file);
               const stat = await fs.promises.stat(fullPath);

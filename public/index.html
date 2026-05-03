@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AIS Plus Audio</title>
-    <link rel="stylesheet" href="./styles.css?v=0.2.3" />
-    <script defer src="./app.js?v=0.2.3"></script>
+    <link rel="stylesheet" href="./styles.css?v=0.3.0" />
+    <script defer src="./app.js?v=0.3.0"></script>
   </head>
   <body>
     <main>
@@ -37,7 +37,20 @@
             <dt>Filtered</dt>
             <dd id="filteredCount">0</dd>
           </div>
+          <div>
+            <dt>Stream</dt>
+            <dd id="streamCount">0</dd>
+          </div>
         </dl>
+      </section>
+
+      <section class="panel">
+        <h2>Radio stream</h2>
+        <p class="muted">
+          Use this URL in a radio player app to keep AIS Plus Audio playing while
+          a phone or tablet is locked.
+        </p>
+        <p class="path" id="streamUrl"></p>
       </section>
 
       <section class="panel">
