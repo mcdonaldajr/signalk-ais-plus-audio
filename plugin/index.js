@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
@@ -18,6 +19,7 @@ module.exports = function aisPlusAudio(app) {
   let liveSilenceTimer = null;
   let liveSilenceFile = null;
   let liveStreamPauseUntil = 0;
+  let publicStreamServer = null;
   const liveStreamClients = new Set();
   let stats = {
     received: 0,
@@ -35,6 +37,7 @@ module.exports = function aisPlusAudio(app) {
   plugin.start = (pluginOptions = {}) => {
     options = normalizeOptions(pluginOptions);
     ensureAudioDirectory();
+    startPublicStreamServer();
     subscribeToAisPlusAnnouncements();
     app.setPluginStatus(`Started v${packageInfo.version}`);
   };
@@ -54,6 +57,7 @@ module.exports = function aisPlusAudio(app) {
     for (const client of Array.from(liveStreamClients)) {
       closeLiveStreamClient(client);
     }
+    stopPublicStreamServer();
   };
 
   plugin.schema = {
@@ -82,6 +86,20 @@ module.exports = function aisPlusAudio(app) {
         description:
           "Serves a continuous stream for radio player apps that can keep playing while a phone is locked.",
         default: true,
+      },
+      publicHttpStream: {
+        type: "boolean",
+        title: "Enable unauthenticated local stream port",
+        description:
+          "Serves only the live audio stream on a separate local HTTP port, so native radio apps do not need a Signal K login.",
+        default: true,
+      },
+      publicHttpStreamPort: {
+        type: "integer",
+        title: "Local stream port",
+        default: 3445,
+        minimum: 1024,
+        maximum: 65535,
       },
       piperBinary: {
         type: "string",
@@ -282,6 +300,8 @@ module.exports = function aisPlusAudio(app) {
       muted: value.muted === true,
       localPlayback: value.localPlayback !== false,
       liveStream: value.liveStream !== false,
+      publicHttpStream: value.publicHttpStream !== false,
+      publicHttpStreamPort: clampInteger(value.publicHttpStreamPort, 1024, 65535, 3445),
       piperBinary: expandHome(String(value.piperBinary || "piper")),
       ffmpegBinary: expandHome(String(value.ffmpegBinary || "ffmpeg")),
       audioPlayer: expandHome(String(value.audioPlayer || "aplay")),
@@ -528,6 +548,10 @@ module.exports = function aisPlusAudio(app) {
       liveStreamClients: liveStreamClients.size,
       streamUrl: `/plugins/${PLUGIN_ID}/live.mp3`,
       playlistUrl: `/plugins/${PLUGIN_ID}/live.m3u`,
+      publicHttpStream: options.publicHttpStream,
+      publicHttpStreamPort: options.publicHttpStreamPort,
+      publicStreamUrl: `http://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.mp3`,
+      publicPlaylistUrl: `http://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.m3u`,
       masterVolumePercent: options.masterVolumePercent,
       speechVolumePercent: options.speechVolumePercent,
       pingVolumePercent: options.pingVolumePercent,
@@ -638,6 +662,76 @@ module.exports = function aisPlusAudio(app) {
 
     await writeFileToLiveClient(client, liveSilenceFile);
     startLiveStreamSilence();
+  }
+
+  function startPublicStreamServer() {
+    if (!options.publicHttpStream || publicStreamServer) return;
+    publicStreamServer = http.createServer((req, res) => {
+      const requestUrl = new URL(req.url || "/", "http://localhost");
+      if (req.method !== "GET") {
+        sendPlainResponse(res, 405, "Method not allowed\n", "text/plain; charset=utf-8");
+        return;
+      }
+      if (requestUrl.pathname === "/live.mp3") {
+        if (!options.liveStream) {
+          sendJsonResponse(res, 404, { error: "Live stream is disabled." });
+          return;
+        }
+        addLiveStreamClient(res).catch((error) => {
+          addRecent("error", `Public live stream failed: ${error.message}`);
+          if (!res.headersSent) {
+            sendJsonResponse(res, 500, { error: error.message });
+          } else {
+            res.end();
+          }
+        });
+        return;
+      }
+      if (requestUrl.pathname === "/live.m3u") {
+        const host = req.headers.host || `localhost:${options.publicHttpStreamPort}`;
+        sendPlainResponse(
+          res,
+          200,
+          `#EXTM3U\n#EXTINF:-1,AIS Plus Audio\nhttp://${host}/live.mp3\n`,
+          "audio/x-mpegurl; charset=utf-8",
+        );
+        return;
+      }
+      if (requestUrl.pathname === "/status") {
+        sendJsonResponse(res, 200, {
+          ok: true,
+          plugin: PLUGIN_ID,
+          version: packageInfo.version,
+          clients: liveStreamClients.size,
+        });
+        return;
+      }
+      sendPlainResponse(res, 404, "Not found\n", "text/plain; charset=utf-8");
+    });
+    publicStreamServer.on("error", (error) => {
+      addRecent("error", `Public stream server failed: ${error.message}`);
+      app.error(`[${PLUGIN_ID}] public stream server failed: ${error.stack || error.message}`);
+    });
+    publicStreamServer.listen(options.publicHttpStreamPort, "0.0.0.0", () => {
+      addRecent("stream-server", `Listening on http://0.0.0.0:${options.publicHttpStreamPort}`);
+    });
+  }
+
+  function stopPublicStreamServer() {
+    if (!publicStreamServer) return;
+    publicStreamServer.close();
+    publicStreamServer = null;
+  }
+
+  function sendJsonResponse(res, statusCode, body) {
+    sendPlainResponse(res, statusCode, `${JSON.stringify(body)}\n`, "application/json; charset=utf-8");
+  }
+
+  function sendPlainResponse(res, statusCode, body, contentType) {
+    res.statusCode = statusCode;
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-store");
+    res.end(body);
   }
 
   function closeLiveStreamClient(client) {

@@ -57,7 +57,9 @@ function renderStatus(status) {
   filteredCount.textContent = status.stats?.filtered ?? 0;
   streamCount.textContent = status.liveStreamClients ?? 0;
   audioDirectory.textContent = status.audioDirectory || "";
-  streamUrl.textContent = `${window.location.origin}${status.streamUrl || "/plugins/signalk-ais-plus-audio/live.mp3"}`;
+  streamUrl.textContent =
+    status.publicStreamUrl ||
+    `${window.location.origin}${status.streamUrl || "/plugins/signalk-ais-plus-audio/live.mp3"}`;
 
   if (status.lastAnnouncement?.message) {
     lastAnnouncement.classList.remove("muted");
