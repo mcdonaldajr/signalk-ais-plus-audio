@@ -23,6 +23,7 @@ module.exports = function aisPlusAudio(app) {
   let publicStreamServer = null;
   let publicStreamIsHttps = false;
   const liveStreamClients = new Set();
+  let droppedLaggingClients = 0;
   let stats = {
     received: 0,
     queued: 0,
@@ -166,6 +167,15 @@ module.exports = function aisPlusAudio(app) {
         minimum: 32,
         maximum: 192,
       },
+      maxStreamLagSeconds: {
+        type: "integer",
+        title: "Maximum stream lag before reconnect (seconds)",
+        description:
+          "If a radio player falls this far behind, AIS Plus Audio closes that stream instead of queuing stale announcements behind old silence.",
+        default: 30,
+        minimum: 5,
+        maximum: 300,
+      },
       masterVolumePercent: {
         type: "number",
         title: "Master volume (%)",
@@ -296,6 +306,11 @@ module.exports = function aisPlusAudio(app) {
       res.json({ ok: true });
     });
 
+    router.post("/restart-streams", (_req, res) => {
+      const count = restartLiveStreamClients("manual stream restart");
+      res.json({ ok: true, restarted: count });
+    });
+
     router.post("/repeat-last", (_req, res) => {
       if (!lastAnnouncement) {
         res.status(404).json({ error: "No announcement has been received yet." });
@@ -330,6 +345,7 @@ module.exports = function aisPlusAudio(app) {
       maxAudioFiles: clampInteger(value.maxAudioFiles, 1, 200, 30),
       maxQueueLength: clampInteger(value.maxQueueLength, 1, 100, 10),
       mp3BitrateKbps: clampInteger(value.mp3BitrateKbps, 32, 192, 64),
+      maxStreamLagSeconds: clampInteger(value.maxStreamLagSeconds, 5, 300, 30),
       masterVolumePercent: normalizePercentValue(value.masterVolumePercent, value.masterVolume, 100, 200),
       speechVolumePercent: normalizePercentValue(value.speechVolumePercent, value.speechVolume, 65, 200),
       pingEnabled: value.pingEnabled !== false,
@@ -575,6 +591,8 @@ module.exports = function aisPlusAudio(app) {
       publicStreamUrl: `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.mp3`,
       publicPlaylistUrl: `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.m3u`,
       mp3BitrateKbps: options.mp3BitrateKbps,
+      maxStreamLagSeconds: options.maxStreamLagSeconds,
+      maxStreamBufferBytes: maxStreamBufferBytes(),
       masterVolumePercent: options.masterVolumePercent,
       speechVolumePercent: options.speechVolumePercent,
       pingVolumePercent: options.pingVolumePercent,
@@ -583,6 +601,7 @@ module.exports = function aisPlusAudio(app) {
       lastAnnouncement,
       recentEvents: recentEvents.slice().reverse(),
       stats,
+      droppedLaggingClients,
       audioDirectory: expandHome(options.audioDirectory),
       voices: listVoices(),
     };
@@ -809,6 +828,10 @@ module.exports = function aisPlusAudio(app) {
     liveSilenceTimer = setInterval(() => {
       if (!liveStreamClients.size || Date.now() < liveStreamPauseUntil || !liveSilenceFile) return;
       for (const client of Array.from(liveStreamClients)) {
+        if (isStreamClientLagging(client)) {
+          closeLaggingLiveStreamClient(client, "silence");
+          continue;
+        }
         writeFileToLiveClient(client, liveSilenceFile).catch(() => closeLiveStreamClient(client));
       }
     }, 1000);
@@ -859,6 +882,10 @@ module.exports = function aisPlusAudio(app) {
     const stat = await fs.promises.stat(mp3File);
     liveStreamPauseUntil = Date.now() + estimateMp3DurationMs(stat.size) + 600;
     for (const client of Array.from(liveStreamClients)) {
+      if (isStreamClientLagging(client)) {
+        closeLaggingLiveStreamClient(client, "announcement");
+        continue;
+      }
       writeFileToLiveClient(client, mp3File).catch(() => closeLiveStreamClient(client));
     }
     addRecent("streamed", `Streamed announcement to ${liveStreamClients.size} client(s)`);
@@ -878,6 +905,32 @@ module.exports = function aisPlusAudio(app) {
   function estimateMp3DurationMs(bytes) {
     const bytesPerSecond = Math.max(1, (options.mp3BitrateKbps * 1000) / 8);
     return Math.max(1200, Math.min(30000, Math.round((bytes / bytesPerSecond) * 1000)));
+  }
+
+  function maxStreamBufferBytes() {
+    return Math.round(((options.mp3BitrateKbps * 1000) / 8) * options.maxStreamLagSeconds);
+  }
+
+  function isStreamClientLagging(client) {
+    return Number(client?.res?.writableLength || 0) > maxStreamBufferBytes();
+  }
+
+  function closeLaggingLiveStreamClient(client, phase) {
+    droppedLaggingClients += 1;
+    addRecent(
+      "stream-lag-reset",
+      `Restarted lagging stream during ${phase}; buffered ${client?.res?.writableLength || 0} bytes`,
+    );
+    closeLiveStreamClient(client);
+  }
+
+  function restartLiveStreamClients(reason) {
+    const clients = Array.from(liveStreamClients);
+    for (const client of clients) {
+      closeLiveStreamClient(client);
+    }
+    addRecent("stream-restart", `${clients.length} live stream client(s) restarted: ${reason}`);
+    return clients.length;
   }
 
   function absolutePluginUrl(req, pluginPath) {

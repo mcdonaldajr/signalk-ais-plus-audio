@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AIS Plus Audio</title>
-    <link rel="stylesheet" href="./styles.css?v=0.3.3" />
-    <script defer src="./app.js?v=0.3.3"></script>
+    <link rel="stylesheet" href="./styles.css?v=0.3.4" />
+    <script defer src="./app.js?v=0.3.4"></script>
   </head>
   <body>
     <main>
@@ -23,6 +23,7 @@
           <button type="button" id="buttonSoundCheck">Sound check</button>
           <button type="button" id="buttonRepeatLast" class="secondary">Repeat last</button>
           <button type="button" id="buttonClearQueue" class="secondary">Clear queue</button>
+          <button type="button" id="buttonRestartStreams" class="secondary">Restart streams</button>
         </div>
         <dl class="stats">
           <div>
@@ -40,6 +41,10 @@
           <div>
             <dt>Stream</dt>
             <dd id="streamCount">0</dd>
+          </div>
+          <div>
+            <dt>Dropped</dt>
+            <dd id="droppedStreamCount">0</dd>
           </div>
         </dl>
       </section>

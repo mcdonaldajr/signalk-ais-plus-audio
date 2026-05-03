@@ -3,6 +3,7 @@ const queueLength = document.getElementById("queueLength");
 const renderedCount = document.getElementById("renderedCount");
 const filteredCount = document.getElementById("filteredCount");
 const streamCount = document.getElementById("streamCount");
+const droppedStreamCount = document.getElementById("droppedStreamCount");
 const lastAnnouncement = document.getElementById("lastAnnouncement");
 const lastAudio = document.getElementById("lastAudio");
 const audioDirectory = document.getElementById("audioDirectory");
@@ -12,6 +13,7 @@ const events = document.getElementById("events");
 document.getElementById("buttonSoundCheck").addEventListener("click", () => postJson("sound-check"));
 document.getElementById("buttonRepeatLast").addEventListener("click", () => postJson("repeat-last"));
 document.getElementById("buttonClearQueue").addEventListener("click", () => postJson("clear-queue"));
+document.getElementById("buttonRestartStreams").addEventListener("click", () => postJson("restart-streams"));
 
 refresh();
 setInterval(refresh, 2000);
@@ -56,6 +58,7 @@ function renderStatus(status) {
   renderedCount.textContent = status.stats?.rendered ?? 0;
   filteredCount.textContent = status.stats?.filtered ?? 0;
   streamCount.textContent = status.liveStreamClients ?? 0;
+  droppedStreamCount.textContent = status.droppedLaggingClients ?? 0;
   audioDirectory.textContent = status.audioDirectory || "";
   streamUrl.textContent =
     status.publicStreamUrl ||

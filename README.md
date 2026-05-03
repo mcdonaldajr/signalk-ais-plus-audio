@@ -16,7 +16,7 @@ AIS Plus announcement event
 
 ## Current State
 
-Version `0.3.3` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, can play the combined WAV locally on the Signal K server, and exposes a continuous radio-style MP3 stream for native player apps.
+Version `0.3.4` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, can play the combined WAV locally on the Signal K server, and exposes a continuous radio-style MP3 stream for native player apps.
 
 Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
 
@@ -26,7 +26,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.3.3 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.3.4 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
@@ -80,6 +80,14 @@ At the default 64 kbit/s MP3 stream rate, allow roughly:
 ```
 
 The bitrate is configurable in the Signal K plugin settings as **MP3 stream bitrate (kbit/s)**.
+
+### Stream Lag Guard
+
+AIS Plus Audio treats the radio stream as live audio, not as a podcast queue. If a player falls too far behind, the server closes that stream instead of writing a fresh announcement behind old buffered silence. The player should then reconnect and resume from the current live stream.
+
+The lag limit is configurable as **Maximum stream lag before reconnect (seconds)** and defaults to 30 seconds.
+
+Use **Restart streams** in the AIS Plus Audio webapp to test whether a radio app reconnects automatically after the stream is deliberately closed. If it does not reconnect, start the station manually again in the radio app.
 
 This traffic should stay on the local boat LAN when the stream URL uses the local hostname `nemo3.local`. It should not use the boat router's cellular data unless the phone is no longer on the boat Wi-Fi, the hostname is being resolved through a remote/VPN route, or the router is configured to hairpin local traffic through an internet service.
 
