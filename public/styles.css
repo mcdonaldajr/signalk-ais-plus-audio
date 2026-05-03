@@ -1,0 +1,164 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #07111f;
+  color: #eef6ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #07111f;
+}
+
+main {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 24px 16px 36px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(1.8rem, 5vw, 3rem);
+}
+
+h2 {
+  font-size: 1rem;
+  margin-bottom: 12px;
+}
+
+.eyebrow {
+  color: #67e8f9;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.panel {
+  background: #101b2c;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 12px 0;
+}
+
+.status-pill {
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  color: #dbeafe;
+  font-weight: 800;
+  min-width: 6rem;
+  padding: 8px 12px;
+  text-align: center;
+}
+
+.status-pill.good {
+  background: #064e3b;
+}
+
+.status-pill.warn {
+  background: #78350f;
+}
+
+.status-pill.bad {
+  background: #7f1d1d;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+button {
+  appearance: none;
+  background: #38bdf8;
+  border: 0;
+  border-radius: 10px;
+  color: #06111f;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  padding: 11px 14px;
+}
+
+button.secondary {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+}
+
+.stats div {
+  background: #0b1423;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+dt {
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+dd {
+  font-size: 1.6rem;
+  font-weight: 900;
+  margin: 2px 0 0;
+}
+
+.message {
+  font-size: 1.1rem;
+  line-height: 1.45;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.path {
+  color: #67e8f9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+
+.events {
+  display: grid;
+  gap: 8px;
+}
+
+.events article {
+  display: grid;
+  gap: 3px;
+  background: #0b1423;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.events time {
+  color: #94a3b8;
+  font-size: 0.8rem;
+}

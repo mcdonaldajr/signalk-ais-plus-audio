@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="AIS Plus Audio">
+  <rect width="120" height="120" rx="24" fill="#07111f"/>
+  <path d="M23 66h15l22 18V36L38 54H23z" fill="#38bdf8"/>
+  <path d="M75 42c8 7 12 14 12 23s-4 16-12 23" fill="none" stroke="#f8fafc" stroke-width="8" stroke-linecap="round"/>
+  <path d="M89 29c14 12 21 24 21 36s-7 24-21 36" fill="none" stroke="#22c55e" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="76" cy="30" r="8" fill="#f59e0b"/>
+</svg>

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AIS Plus Audio</title>
+    <link rel="stylesheet" href="./styles.css?v=0.1.0" />
+    <script defer src="./app.js?v=0.1.0"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">AIS Plus Audio</p>
+          <h1>Piper audio bridge</h1>
+        </div>
+        <div class="status-pill" id="statusPill">Loading</div>
+      </header>
+
+      <section class="panel">
+        <h2>Playback</h2>
+        <div class="button-row">
+          <button type="button" id="buttonSoundCheck">Sound check</button>
+          <button type="button" id="buttonRepeatLast" class="secondary">Repeat last</button>
+          <button type="button" id="buttonClearQueue" class="secondary">Clear queue</button>
+        </div>
+        <dl class="stats">
+          <div>
+            <dt>Queue</dt>
+            <dd id="queueLength">0</dd>
+          </div>
+          <div>
+            <dt>Rendered</dt>
+            <dd id="renderedCount">0</dd>
+          </div>
+          <div>
+            <dt>Filtered</dt>
+            <dd id="filteredCount">0</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel">
+        <h2>Last announcement</h2>
+        <p id="lastAnnouncement" class="message muted">No announcement received yet.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Renderer</h2>
+        <p class="muted">
+          This first version subscribes to AIS Plus sound notifications and records
+          the render queue. The next step is Piper WAV, stereo ping mixing, MP3
+          serving, and Companion playback.
+        </p>
+        <p class="path" id="audioDirectory"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Recent events</h2>
+        <div id="events" class="events empty">No events yet.</div>
+      </section>
+    </main>
+  </body>
+</html>
