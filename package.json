@@ -1,6 +1,6 @@
 {
   "name": "signalk-ais-plus-audio",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Piper audio renderer and browser audio bridge for AIS Plus announcements.",
   "main": "plugin/index.js",
   "scripts": {
@@ -35,6 +35,6 @@
   "signalk-plugin-enabled-by-default": false,
   "signalk": {
     "displayName": "AIS Plus Audio",
-    "appIcon": "./icon.svg"
+    "appIcon": "./icon-120.png"
   }
 }
