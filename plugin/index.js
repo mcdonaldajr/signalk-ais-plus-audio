@@ -93,8 +93,8 @@ module.exports = function aisPlusAudio(app) {
       voice: {
         type: "string",
         title: "Piper voice model",
-        description: "The .onnx filename or voice id to use. Leave blank to use the first detected voice.",
-        default: "",
+        description: "The .onnx filename or voice id to use.",
+        default: "alan-medium",
       },
       audioDirectory: {
         type: "string",
@@ -246,7 +246,7 @@ module.exports = function aisPlusAudio(app) {
       ffmpegBinary: String(value.ffmpegBinary || "ffmpeg"),
       audioPlayer: String(value.audioPlayer || "aplay"),
       voicesDir: String(value.voicesDir || "~/piper-voices"),
-      voice: String(value.voice || ""),
+      voice: String(value.voice || "alan-medium"),
       audioDirectory: String(value.audioDirectory || DEFAULT_AUDIO_DIR),
       maxAudioFiles: clampInteger(value.maxAudioFiles, 1, 200, 30),
       maxQueueLength: clampInteger(value.maxQueueLength, 1, 100, 10),
