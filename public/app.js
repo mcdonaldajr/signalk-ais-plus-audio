@@ -5,10 +5,13 @@ const filteredCount = document.getElementById("filteredCount");
 const streamCount = document.getElementById("streamCount");
 const droppedStreamCount = document.getElementById("droppedStreamCount");
 const serverTime = document.getElementById("serverTime");
+const streamConnectedTotal = document.getElementById("streamConnectedTotal");
+const streamDisconnectedTotal = document.getElementById("streamDisconnectedTotal");
 const lastAnnouncement = document.getElementById("lastAnnouncement");
 const lastAudio = document.getElementById("lastAudio");
 const audioDirectory = document.getElementById("audioDirectory");
 const streamUrl = document.getElementById("streamUrl");
+const streamDiagnostics = document.getElementById("streamDiagnostics");
 const events = document.getElementById("events");
 
 document.getElementById("buttonSoundCheck").addEventListener("click", () => postJson("sound-check"));
@@ -62,10 +65,13 @@ function renderStatus(status) {
   streamCount.textContent = status.liveStreamClients ?? 0;
   droppedStreamCount.textContent = status.droppedLaggingClients ?? 0;
   serverTime.textContent = formatTime(status.serverTime);
+  streamConnectedTotal.textContent = status.streamStats?.connectedTotal ?? 0;
+  streamDisconnectedTotal.textContent = status.streamStats?.disconnectedTotal ?? 0;
   audioDirectory.textContent = status.audioDirectory || "";
   streamUrl.textContent =
     status.publicStreamUrl ||
     `${window.location.origin}${status.streamUrl || "/plugins/signalk-ais-plus-audio/live.mp3"}`;
+  streamDiagnostics.textContent = formatStreamDiagnostics(status);
 
   if (status.lastAnnouncement?.message) {
     lastAnnouncement.classList.remove("muted");
@@ -87,6 +93,28 @@ function renderStatus(status) {
   }
 
   renderEvents(status.recentEvents || []);
+}
+
+function formatStreamDiagnostics(status) {
+  const connections = status.liveStreamConnections || [];
+  if (connections.length) {
+    return connections
+      .map(
+        (client) =>
+          `Client ${client.id} from ${client.remote}, connected ${formatDuration(client.uptimeSeconds)}, buffer ${client.writableLength} bytes`,
+      )
+      .join(" | ");
+  }
+  const last = status.streamStats || {};
+  if (!last.lastDisconnectedAt) return "No stream clients have connected yet.";
+  return `Last disconnect ${formatTime(last.lastDisconnectedAt)} from ${last.lastDisconnectedRemote || "unknown"} after ${formatDuration(last.lastClientUptimeSeconds)}: ${last.lastDisconnectReason || "closed"}`;
+}
+
+function formatDuration(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  const mins = Math.floor(value / 60);
+  const secs = Math.round(value % 60);
+  return mins ? `${mins}m ${secs}s` : `${secs}s`;
 }
 
 function renderEvents(items) {

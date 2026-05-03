@@ -16,7 +16,7 @@ AIS Plus announcement event
 
 ## Current State
 
-Version `0.3.6` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, can play the combined WAV locally on the Signal K server, and exposes a continuous radio-style MP3 stream for native player apps.
+Version `0.3.7` renders Piper WAV announcements, prepends the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, can play the combined WAV locally on the Signal K server, and exposes a continuous radio-style MP3 stream for native player apps.
 
 Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
 
@@ -26,7 +26,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.3.6 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.3.7 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
@@ -94,6 +94,10 @@ Use **Restart streams** in the AIS Plus Audio webapp to test whether a radio app
 Enable **Announce time on live stream** to periodically speak the Signal K server time into the radio stream. This is a practical drift test: if the announcement says a time that is several minutes behind the actual time, the player has built up too much buffer delay.
 
 The interval is configurable as **Live stream time-check interval (minutes)**. The manual **Stream time check** button sends one time announcement immediately. Time checks are stream-only and are not played on the Pi speaker. The webapp displays the current server time so the spoken time can be compared with the Pi clock.
+
+### Stream Diagnostics
+
+The AIS Plus Audio webapp shows current stream clients, total connects/disconnects, client uptime, server-side write buffer size, and the last disconnect reason. The stream also sends basic ICY radio headers (`icy-name`, `icy-genre`, `icy-br`) so native radio players can recognise it as a radio-style stream.
 
 This traffic should stay on the local boat LAN when the stream URL uses the local hostname `nemo3.local`. It should not use the boat router's cellular data unless the phone is no longer on the boat Wi-Fi, the hostname is being resolved through a remote/VPN route, or the router is configured to hairpin local traffic through an internet service.
 

@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AIS Plus Audio</title>
-    <link rel="stylesheet" href="./styles.css?v=0.3.6" />
-    <script defer src="./app.js?v=0.3.6"></script>
+    <link rel="stylesheet" href="./styles.css?v=0.3.7" />
+    <script defer src="./app.js?v=0.3.7"></script>
   </head>
   <body>
     <main>
@@ -51,6 +51,14 @@
             <dt>Server time</dt>
             <dd id="serverTime">--:--:--</dd>
           </div>
+          <div>
+            <dt>Connected</dt>
+            <dd id="streamConnectedTotal">0</dd>
+          </div>
+          <div>
+            <dt>Disconnected</dt>
+            <dd id="streamDisconnectedTotal">0</dd>
+          </div>
         </dl>
       </section>
 
@@ -61,6 +69,7 @@
           playing while a phone or tablet is locked.
         </p>
         <p class="path" id="streamUrl"></p>
+        <p class="muted" id="streamDiagnostics">No stream diagnostics yet.</p>
       </section>
 
       <section class="panel">

@@ -26,7 +26,18 @@ module.exports = function aisPlusAudio(app) {
   let lastRealAnnouncementAt = 0;
   let lastStreamHealthAt = 0;
   const liveStreamClients = new Set();
+  let nextLiveStreamClientId = 1;
   let droppedLaggingClients = 0;
+  const streamStats = {
+    connectedTotal: 0,
+    disconnectedTotal: 0,
+    lastConnectedAt: null,
+    lastConnectedRemote: "",
+    lastDisconnectedAt: null,
+    lastDisconnectedRemote: "",
+    lastDisconnectReason: "",
+    lastClientUptimeSeconds: 0,
+  };
   let stats = {
     received: 0,
     queued: 0,
@@ -62,7 +73,7 @@ module.exports = function aisPlusAudio(app) {
     active = null;
     stopLiveStreamSilence();
     for (const client of Array.from(liveStreamClients)) {
-      closeLiveStreamClient(client);
+      closeLiveStreamClient(client, "plugin stop");
     }
     stopPublicStreamServer();
     stopStreamHealthTimer();
@@ -614,6 +625,13 @@ module.exports = function aisPlusAudio(app) {
       localPlayback: options.localPlayback,
       liveStream: options.liveStream,
       liveStreamClients: liveStreamClients.size,
+      liveStreamConnections: Array.from(liveStreamClients).map((client) => ({
+        id: client.id,
+        connectedAt: new Date(client.connectedAt).toISOString(),
+        remote: client.remote,
+        uptimeSeconds: Math.max(0, Math.round((Date.now() - client.connectedAt) / 1000)),
+        writableLength: client.res?.writableLength || 0,
+      })),
       streamUrl: `/plugins/${PLUGIN_ID}/live.mp3`,
       playlistUrl: `/plugins/${PLUGIN_ID}/live.m3u`,
       publicHttpStream: options.publicHttpStream,
@@ -636,6 +654,7 @@ module.exports = function aisPlusAudio(app) {
       recentEvents: recentEvents.slice().reverse(),
       stats,
       droppedLaggingClients,
+      streamStats,
       audioDirectory: expandHome(options.audioDirectory),
       voices: listVoices(),
     };
@@ -729,12 +748,31 @@ module.exports = function aisPlusAudio(app) {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader("icy-name", "AIS Plus Audio");
+    res.setHeader("icy-genre", "Marine Safety");
+    res.setHeader("icy-br", String(options.mp3BitrateKbps));
+    res.setHeader("icy-pub", "0");
+    res.setHeader("icy-metaint", "0");
+    res.setHeader("Accept-Ranges", "none");
     res.flushHeaders?.();
 
-    const client = { res, connectedAt: Date.now() };
+    const client = {
+      id: nextLiveStreamClientId,
+      res,
+      connectedAt: Date.now(),
+      remote: streamRemoteAddress(res.req),
+      disconnecting: false,
+    };
+    nextLiveStreamClientId += 1;
     liveStreamClients.add(client);
-    addRecent("stream-connected", `${liveStreamClients.size} live stream client(s)`);
-    res.on("close", () => closeLiveStreamClient(client));
+    streamStats.connectedTotal += 1;
+    streamStats.lastConnectedAt = new Date(client.connectedAt).toISOString();
+    streamStats.lastConnectedRemote = client.remote;
+    addRecent(
+      "stream-connected",
+      `Client ${client.id} connected from ${client.remote}; ${liveStreamClients.size} live stream client(s)`,
+    );
+    res.on("close", () => closeLiveStreamClient(client, client.disconnectReason || "client closed connection"));
 
     await writeFileToLiveClient(client, liveSilenceFile);
     startLiveStreamSilence();
@@ -781,6 +819,7 @@ module.exports = function aisPlusAudio(app) {
           plugin: PLUGIN_ID,
           version: packageInfo.version,
           clients: liveStreamClients.size,
+          streamStats,
         });
         return;
       }
@@ -843,15 +882,30 @@ module.exports = function aisPlusAudio(app) {
     return publicStreamIsHttps ? "https" : "http";
   }
 
-  function closeLiveStreamClient(client) {
+  function closeLiveStreamClient(client, reason = "closed") {
     if (!liveStreamClients.has(client)) return;
+    client.disconnectReason = reason;
     liveStreamClients.delete(client);
+    const disconnectedAt = Date.now();
+    streamStats.disconnectedTotal += 1;
+    streamStats.lastDisconnectedAt = new Date(disconnectedAt).toISOString();
+    streamStats.lastDisconnectedRemote = client.remote || "";
+    streamStats.lastDisconnectReason = reason;
+    streamStats.lastClientUptimeSeconds = Math.max(
+      0,
+      Math.round((disconnectedAt - (client.connectedAt || disconnectedAt)) / 1000),
+    );
     try {
-      client.res.end();
+      if (!client.res.destroyed && !client.res.writableEnded) {
+        client.res.end();
+      }
     } catch {
       // Client has already gone away.
     }
-    addRecent("stream-disconnected", `${liveStreamClients.size} live stream client(s)`);
+    addRecent(
+      "stream-disconnected",
+      `Client ${client.id} disconnected: ${reason}; ${liveStreamClients.size} live stream client(s)`,
+    );
     if (liveStreamClients.size === 0) {
       stopLiveStreamSilence();
     }
@@ -866,7 +920,9 @@ module.exports = function aisPlusAudio(app) {
           closeLaggingLiveStreamClient(client, "silence");
           continue;
         }
-        writeFileToLiveClient(client, liveSilenceFile).catch(() => closeLiveStreamClient(client));
+        writeFileToLiveClient(client, liveSilenceFile).catch(() =>
+          closeLiveStreamClient(client, "write failed during silence"),
+        );
       }
     }, 1000);
   }
@@ -920,14 +976,16 @@ module.exports = function aisPlusAudio(app) {
         closeLaggingLiveStreamClient(client, "announcement");
         continue;
       }
-      writeFileToLiveClient(client, mp3File).catch(() => closeLiveStreamClient(client));
+      writeFileToLiveClient(client, mp3File).catch(() =>
+        closeLiveStreamClient(client, "write failed during announcement"),
+      );
     }
     addRecent("streamed", `Streamed announcement to ${liveStreamClients.size} client(s)`);
   }
 
   async function writeFileToLiveClient(client, file) {
     if (!client?.res || client.res.destroyed || client.res.writableEnded) {
-      closeLiveStreamClient(client);
+      closeLiveStreamClient(client, "stream no longer writable");
       return;
     }
     const buffer = await fs.promises.readFile(file);
@@ -955,13 +1013,13 @@ module.exports = function aisPlusAudio(app) {
       "stream-lag-reset",
       `Restarted lagging stream during ${phase}; buffered ${client?.res?.writableLength || 0} bytes`,
     );
-    closeLiveStreamClient(client);
+    closeLiveStreamClient(client, `lag guard during ${phase}`);
   }
 
   function restartLiveStreamClients(reason) {
     const clients = Array.from(liveStreamClients);
     for (const client of clients) {
-      closeLiveStreamClient(client);
+      closeLiveStreamClient(client, reason);
     }
     addRecent("stream-restart", `${clients.length} live stream client(s) restarted: ${reason}`);
     return clients.length;
@@ -1004,6 +1062,12 @@ module.exports = function aisPlusAudio(app) {
       force,
       streamOnly: true,
     });
+  }
+
+  function streamRemoteAddress(req) {
+    const forwarded = req?.headers?.["x-forwarded-for"];
+    if (forwarded) return String(forwarded).split(",")[0].trim();
+    return req?.socket?.remoteAddress || req?.connection?.remoteAddress || "unknown";
   }
 
   function absolutePluginUrl(req, pluginPath) {
