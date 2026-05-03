@@ -115,31 +115,31 @@ module.exports = function aisPlusAudio(app) {
         minimum: 1,
         maximum: 100,
       },
-      masterVolume: {
+      masterVolumePercent: {
         type: "number",
-        title: "Master volume",
-        default: 1,
+        title: "Master volume (%)",
+        default: 100,
         minimum: 0,
-        maximum: 2,
+        maximum: 200,
       },
-      speechVolume: {
+      speechVolumePercent: {
         type: "number",
-        title: "Speech volume",
-        default: 0.65,
+        title: "Speech volume (%)",
+        default: 65,
         minimum: 0,
-        maximum: 2,
+        maximum: 200,
       },
       pingEnabled: {
         type: "boolean",
         title: "Enable directional ping",
         default: true,
       },
-      pingVolume: {
+      pingVolumePercent: {
         type: "number",
-        title: "Directional ping volume",
-        default: 1,
+        title: "Directional ping volume (%)",
+        default: 100,
         minimum: 0,
-        maximum: 4,
+        maximum: 400,
       },
       pingSmallFrequencyHz: {
         type: "integer",
@@ -250,10 +250,10 @@ module.exports = function aisPlusAudio(app) {
       audioDirectory: String(value.audioDirectory || DEFAULT_AUDIO_DIR),
       maxAudioFiles: clampInteger(value.maxAudioFiles, 1, 200, 30),
       maxQueueLength: clampInteger(value.maxQueueLength, 1, 100, 10),
-      masterVolume: clampNumber(value.masterVolume, 0, 2, 1),
-      speechVolume: clampNumber(value.speechVolume, 0, 2, 0.65),
+      masterVolumePercent: normalizePercentValue(value.masterVolumePercent, value.masterVolume, 100, 200),
+      speechVolumePercent: normalizePercentValue(value.speechVolumePercent, value.speechVolume, 65, 200),
       pingEnabled: value.pingEnabled !== false,
-      pingVolume: clampNumber(value.pingVolume, 0, 4, 1),
+      pingVolumePercent: normalizePercentValue(value.pingVolumePercent, value.pingVolume, 100, 400),
       pingSmallFrequencyHz: clampInteger(value.pingSmallFrequencyHz, 200, 2400, 1100),
       pingMediumFrequencyHz: clampInteger(value.pingMediumFrequencyHz, 200, 2400, 760),
       pingLargeFrequencyHz: clampInteger(value.pingLargeFrequencyHz, 200, 2400, 440),
@@ -481,6 +481,9 @@ module.exports = function aisPlusAudio(app) {
       enabled: options.enabled,
       muted: options.muted,
       localPlayback: options.localPlayback,
+      masterVolumePercent: options.masterVolumePercent,
+      speechVolumePercent: options.speechVolumePercent,
+      pingVolumePercent: options.pingVolumePercent,
       queueLength: queue.length,
       active,
       lastAnnouncement,
@@ -531,8 +534,8 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function createCombinedWav({ speechWav, pingWav, combinedWav }) {
-    const masterVolume = safeFfmpegNumber(options.masterVolume);
-    const speechVolume = safeFfmpegNumber(options.speechVolume);
+    const masterVolume = percentToGain(options.masterVolumePercent);
+    const speechVolume = percentToGain(options.speechVolumePercent);
     const filter = pingWav
       ? `[0:a]aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=stereo[p];[1:a]aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=stereo,volume=${speechVolume}[s];[p][s]concat=n=2:v=0:a=1,volume=${masterVolume}[out]`
       : `[0:a]aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=stereo,volume=${speechVolume * masterVolume}[out]`;
@@ -604,7 +607,7 @@ module.exports = function aisPlusAudio(app) {
     const pan = clockToPan(clock);
     const leftGain = Math.cos(((pan + 1) * Math.PI) / 4);
     const rightGain = Math.sin(((pan + 1) * Math.PI) / 4);
-    const amplitude = Math.round(32767 * options.pingVolume);
+    const amplitude = Math.round(32767 * percentToGain(options.pingVolumePercent));
     const frequency = pingFrequencyForSize(size);
 
     buffer.write("RIFF", 0);
@@ -769,6 +772,22 @@ module.exports = function aisPlusAudio(app) {
   function safeFfmpegNumber(value) {
     const number = Number(value);
     return Number.isFinite(number) ? number : 1;
+  }
+
+  function percentToGain(value) {
+    return safeFfmpegNumber(value) / 100;
+  }
+
+  function normalizePercentValue(percentValue, legacyGainValue, fallbackPercent, maxPercent) {
+    const explicitPercent = Number(percentValue);
+    if (Number.isFinite(explicitPercent)) {
+      return Math.min(maxPercent, Math.max(0, explicitPercent));
+    }
+    const legacyGain = Number(legacyGainValue);
+    if (Number.isFinite(legacyGain)) {
+      return Math.min(maxPercent, Math.max(0, legacyGain * 100));
+    }
+    return fallbackPercent;
   }
 
   function clampPcm16(value) {
