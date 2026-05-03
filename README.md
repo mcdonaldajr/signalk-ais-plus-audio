@@ -11,7 +11,7 @@ AIS Plus announcement event
   -> Piper speech
   -> stereo directional ping
   -> stereo browser-friendly audio file
-  -> local Pi playback and/or Companion playback
+  -> local Pi playback, Companion playback, and/or native radio player stream
 ```
 
 ## Current State
@@ -34,6 +34,8 @@ Open **AIS Plus Audio** from the Signal K webapps page.
 
 ## Radio Stream
 
+The radio stream is the best iPhone/iPad option when the screen may be locked. Browser and PWA audio normally stops when iOS suspends the page, but a native radio player can keep an already-open stream alive in the background.
+
 Use this local stream URL in a radio player app:
 
 ```text
@@ -53,6 +55,33 @@ https://nemo3.local:3445/live.m3u
 ```
 
 The local stream port serves only the generated audio stream, so native radio player apps do not need a Signal K login cookie. It uses the same `ssl-cert.pem` and `ssl-key.pem` as Signal K when they are available. The stream sends silence between announcements and writes each rendered AIS Plus announcement into the stream as it is produced.
+
+### iPhone/iPad Setup
+
+1. Install a radio stream player app.
+2. Add a custom station using `https://nemo3.local:3445/live.mp3`.
+3. Name it `AIS Plus Audio`.
+4. Start the station while connected to the boat Wi-Fi.
+5. Trigger **Sound check** in the AIS Plus Audio webapp.
+6. Lock the phone and trigger another **Sound check** to confirm background playback.
+
+If the app asks for a playlist rather than a direct stream, use `https://nemo3.local:3445/live.m3u`.
+
+### Network Use
+
+The stream is unicast, not broadcast. Each connected radio app opens one direct TCP/TLS connection to the Pi. It is therefore limited to the network path between that device and the Pi when the device is connected to the boat Wi-Fi.
+
+At the current 128 kbit/s MP3 stream rate, allow roughly:
+
+```text
+16 KB/s per connected player
+58 MB/hour per connected player
+1.4 GB/day per connected player if left running continuously
+```
+
+This traffic should stay on the local boat LAN when the stream URL uses the local hostname `nemo3.local`. It should not use the boat router's cellular data unless the phone is no longer on the boat Wi-Fi, the hostname is being resolved through a remote/VPN route, or the router is configured to hairpin local traffic through an internet service.
+
+For normal use, keep the phone on the boat Wi-Fi and use the local `.local` address. Do not publish or port-forward the stream port to the internet.
 
 ## Responsibilities
 
