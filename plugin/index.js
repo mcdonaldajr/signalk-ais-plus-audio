@@ -482,6 +482,7 @@ module.exports = function aisPlusAudio(app) {
           alertEvent.sizeCategory || announcement.sizeCategory || value?.data?.sizeCategory,
         message,
         sourcePath: pathName,
+        localPlayback: announcement.localPlayback !== false && alertEvent.localPlayback !== false,
       }),
     );
   }
@@ -573,7 +574,7 @@ module.exports = function aisPlusAudio(app) {
       await cleanupGeneratedAudio();
       await broadcastMp3ToLiveStream(mp3File);
 
-      if (!entry.streamOnly && options.localPlayback && !options.muted) {
+      if (!entry.streamOnly && entry.localPlayback !== false && options.localPlayback && !options.muted) {
         await playLocalWav(combinedWav);
       }
 
@@ -604,6 +605,7 @@ module.exports = function aisPlusAudio(app) {
       sourcePath: String(value.sourcePath || ""),
       force: value.force === true,
       streamOnly: value.streamOnly === true,
+      localPlayback: value.localPlayback !== false,
     };
   }
 
