@@ -483,6 +483,7 @@ module.exports = function aisPlusAudio(app) {
         message,
         sourcePath: pathName,
         localPlayback: announcement.localPlayback !== false && alertEvent.localPlayback !== false,
+        streamOutput: announcement.streamOutput !== false && alertEvent.streamOutput !== false,
       }),
     );
   }
@@ -572,7 +573,9 @@ module.exports = function aisPlusAudio(app) {
       };
       await fs.promises.writeFile(metadataFile, `${JSON.stringify(rendered, null, 2)}\n`);
       await cleanupGeneratedAudio();
-      await broadcastMp3ToLiveStream(mp3File);
+      if (entry.streamOutput !== false) {
+        await broadcastMp3ToLiveStream(mp3File);
+      }
 
       if (!entry.streamOnly && entry.localPlayback !== false && options.localPlayback && !options.muted) {
         await playLocalWav(combinedWav);
@@ -606,6 +609,7 @@ module.exports = function aisPlusAudio(app) {
       force: value.force === true,
       streamOnly: value.streamOnly === true,
       localPlayback: value.localPlayback !== false,
+      streamOutput: value.streamOutput !== false,
     };
   }
 
