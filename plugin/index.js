@@ -8,6 +8,7 @@ const packageInfo = require("../package.json");
 
 const PLUGIN_ID = "signalk-ais-plus-audio";
 const DEFAULT_AUDIO_DIR = "~/.signalk/ais-plus-audio";
+const STATUS_PATH = "plugins.aisPlusAudio";
 
 module.exports = function aisPlusAudio(app) {
   const plugin = {};
@@ -23,6 +24,7 @@ module.exports = function aisPlusAudio(app) {
   let publicStreamServer = null;
   let publicStreamIsHttps = false;
   let streamHealthTimer = null;
+  let statusPublishTimer = null;
   let lastRealAnnouncementAt = 0;
   let lastStreamHealthAt = 0;
   const liveStreamClients = new Set();
@@ -56,7 +58,9 @@ module.exports = function aisPlusAudio(app) {
     ensureAudioDirectory();
     startPublicStreamServer();
     startStreamHealthTimer();
+    startStatusPublisher();
     subscribeToAisPlusAnnouncements();
+    publishStatus();
     app.setPluginStatus(`Started v${packageInfo.version}`);
   };
 
@@ -77,6 +81,8 @@ module.exports = function aisPlusAudio(app) {
     }
     stopPublicStreamServer();
     stopStreamHealthTimer();
+    stopStatusPublisher();
+    publishStatus();
   };
 
   plugin.schema = {
@@ -566,6 +572,7 @@ module.exports = function aisPlusAudio(app) {
       const rendered = {
         ...entry,
         audioUrl: `/plugins/${PLUGIN_ID}/audio/${mp3FileName}`,
+        publicAudioUrl: publicAudioFileUrl(mp3FileName),
         streamUrl: `/plugins/${PLUGIN_ID}/live.mp3`,
         playlistUrl: `/plugins/${PLUGIN_ID}/live.m3u`,
         audioFile: mp3FileName,
@@ -622,6 +629,14 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function buildStatus() {
+    const publishedLastAnnouncement = lastAnnouncement
+      ? {
+          ...lastAnnouncement,
+          publicAudioUrl:
+            lastAnnouncement.publicAudioUrl ||
+            publicAudioFileUrl(lastAnnouncement.audioFile),
+        }
+      : null;
     return {
       plugin: PLUGIN_ID,
       version: packageInfo.version,
@@ -656,7 +671,7 @@ module.exports = function aisPlusAudio(app) {
       pingVolumePercent: options.pingVolumePercent,
       queueLength: queue.length,
       active,
-      lastAnnouncement,
+      lastAnnouncement: publishedLastAnnouncement,
       recentEvents: recentEvents.slice().reverse(),
       stats,
       droppedLaggingClients,
@@ -817,6 +832,23 @@ module.exports = function aisPlusAudio(app) {
           `#EXTM3U\n#EXTINF:-1,AIS Plus Audio\n${publicStreamProtocol()}://${host}/live.mp3\n`,
           "audio/x-mpegurl; charset=utf-8",
         );
+        return;
+      }
+      if (requestUrl.pathname.startsWith("/audio/")) {
+        const file = path.basename(decodeURIComponent(requestUrl.pathname.slice("/audio/".length)));
+        if (!file.endsWith(".mp3")) {
+          sendJsonResponse(res, 404, { error: "Audio file not found." });
+          return;
+        }
+        const filePath = path.join(expandHome(options.audioDirectory), file);
+        if (!fs.existsSync(filePath)) {
+          sendJsonResponse(res, 404, { error: "Audio file not found." });
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "audio/mpeg");
+        res.setHeader("Cache-Control", "no-store");
+        fs.createReadStream(filePath).pipe(res);
         return;
       }
       if (requestUrl.pathname === "/status") {
@@ -1049,6 +1081,18 @@ module.exports = function aisPlusAudio(app) {
     }
   }
 
+  function startStatusPublisher() {
+    stopStatusPublisher();
+    statusPublishTimer = setInterval(publishStatus, 2000);
+    statusPublishTimer.unref?.();
+  }
+
+  function stopStatusPublisher() {
+    if (!statusPublishTimer) return;
+    clearInterval(statusPublishTimer);
+    statusPublishTimer = null;
+  }
+
   function createStreamTimeCheckAnnouncement(force) {
     const now = new Date();
     lastStreamHealthAt = now.getTime();
@@ -1081,6 +1125,11 @@ module.exports = function aisPlusAudio(app) {
     const forwardedProto = req.get?.("x-forwarded-proto");
     const protocol = forwardedProto || req.protocol || "https";
     return `${protocol}://${host}/plugins/${PLUGIN_ID}${pluginPath}`;
+  }
+
+  function publicAudioFileUrl(fileName) {
+    if (!options.publicHttpStream || !fileName) return "";
+    return `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/audio/${encodeURIComponent(fileName)}`;
   }
 
   function playLocalWav(file) {
@@ -1258,6 +1307,24 @@ module.exports = function aisPlusAudio(app) {
     if (recentEvents.length > 80) {
       recentEvents = recentEvents.slice(recentEvents.length - 80);
     }
+    publishStatus();
+  }
+
+  function publishStatus() {
+    if (!options || !Object.keys(options).length) return;
+    app.handleMessage(PLUGIN_ID, {
+      context: "vessels.self",
+      updates: [
+        {
+          values: [
+            {
+              path: STATUS_PATH,
+              value: buildStatus(),
+            },
+          ],
+        },
+      ],
+    });
   }
 
   function debug(message) {
