@@ -629,6 +629,7 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function buildStatus() {
+    const publicStreamBase = publicStreamBaseUrl();
     const publishedLastAnnouncement = lastAnnouncement
       ? {
           ...lastAnnouncement,
@@ -659,8 +660,8 @@ module.exports = function aisPlusAudio(app) {
       publicHttpStreamPort: options.publicHttpStreamPort,
       publicStreamUseHttps: options.publicStreamUseHttps,
       publicStreamProtocol: publicStreamProtocol(),
-      publicStreamUrl: `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.mp3`,
-      publicPlaylistUrl: `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/live.m3u`,
+      publicStreamUrl: publicStreamBase ? `${publicStreamBase}/live.mp3` : "",
+      publicPlaylistUrl: publicStreamBase ? `${publicStreamBase}/live.m3u` : "",
       mp3BitrateKbps: options.mp3BitrateKbps,
       maxStreamLagSeconds: options.maxStreamLagSeconds,
       maxStreamBufferBytes: maxStreamBufferBytes(),
@@ -1129,7 +1130,16 @@ module.exports = function aisPlusAudio(app) {
 
   function publicAudioFileUrl(fileName) {
     if (!options.publicHttpStream || !fileName) return "";
-    return `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${options.publicHttpStreamPort}/audio/${encodeURIComponent(fileName)}`;
+    const publicStreamBase = publicStreamBaseUrl();
+    if (!publicStreamBase) return "";
+    return `${publicStreamBase}/audio/${encodeURIComponent(fileName)}`;
+  }
+
+  function publicStreamBaseUrl() {
+    if (!options.publicHttpStream) return "";
+    const port = Number(options.publicHttpStreamPort);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return "";
+    return `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${port}`;
   }
 
   function playLocalWav(file) {
