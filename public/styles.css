@@ -105,6 +105,20 @@ button.secondary {
   color: #f8fafc;
 }
 
+.toggle-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  color: #e2e8f0;
+  font-weight: 800;
+}
+
+.toggle-row input {
+  inline-size: 1.2rem;
+  block-size: 1.2rem;
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

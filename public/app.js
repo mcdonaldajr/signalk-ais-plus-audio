@@ -13,12 +13,21 @@ const audioDirectory = document.getElementById("audioDirectory");
 const streamUrl = document.getElementById("streamUrl");
 const streamDiagnostics = document.getElementById("streamDiagnostics");
 const events = document.getElementById("events");
+const checkPingEnabled = document.getElementById("checkPingEnabled");
 
 document.getElementById("buttonSoundCheck").addEventListener("click", () => postJson("sound-check"));
 document.getElementById("buttonRepeatLast").addEventListener("click", () => postJson("repeat-last"));
 document.getElementById("buttonClearQueue").addEventListener("click", () => postJson("clear-queue"));
 document.getElementById("buttonRestartStreams").addEventListener("click", () => postJson("restart-streams"));
 document.getElementById("buttonStreamTimeCheck").addEventListener("click", () => postJson("stream-time-check"));
+checkPingEnabled.addEventListener("change", () =>
+  postJson(`ping-enabled?enabled=${checkPingEnabled.checked ? "true" : "false"}`).catch(
+    (error) => {
+      renderEvents([{ event: "error", message: error.message, ts: new Date().toISOString() }]);
+      refresh();
+    },
+  ),
+);
 
 refresh();
 setInterval(refresh, 2000);
@@ -67,6 +76,7 @@ function renderStatus(status) {
   serverTime.textContent = formatTime(status.serverTime);
   streamConnectedTotal.textContent = status.streamStats?.connectedTotal ?? 0;
   streamDisconnectedTotal.textContent = status.streamStats?.disconnectedTotal ?? 0;
+  checkPingEnabled.checked = status.pingEnabled !== false;
   audioDirectory.textContent = status.audioDirectory || "";
   streamUrl.textContent =
     status.publicStreamUrl ||

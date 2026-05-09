@@ -336,6 +336,17 @@ module.exports = function aisPlusAudio(app) {
       res.json({ ok: true, announcement: entry });
     });
 
+    router.post("/ping-enabled", (req, res) => {
+      const enabled = String(req.query.enabled || "").toLowerCase() === "true";
+      options.pingEnabled = enabled;
+      addRecent(
+        "settings",
+        `Directional ping ${enabled ? "enabled" : "disabled"} from Audio webapp`,
+      );
+      publishStatus();
+      res.json({ ok: true, pingEnabled: options.pingEnabled, status: buildStatus() });
+    });
+
     router.post("/clear-queue", (_req, res) => {
       queue = [];
       addRecent("queue-cleared", "Announcement queue cleared");
@@ -669,6 +680,7 @@ module.exports = function aisPlusAudio(app) {
       streamHealthIntervalMinutes: options.streamHealthIntervalMinutes,
       masterVolumePercent: options.masterVolumePercent,
       speechVolumePercent: options.speechVolumePercent,
+      pingEnabled: options.pingEnabled,
       pingVolumePercent: options.pingVolumePercent,
       queueLength: queue.length,
       active,

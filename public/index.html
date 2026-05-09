@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AIS Plus Audio</title>
-    <link rel="stylesheet" href="./styles.css?v=0.3.11" />
-    <script defer src="./app.js?v=0.3.11"></script>
+    <link rel="stylesheet" href="./styles.css?v=0.3.14" />
+    <script defer src="./app.js?v=0.3.14"></script>
   </head>
   <body>
     <main>
@@ -26,6 +26,10 @@
           <button type="button" id="buttonRestartStreams" class="secondary">Restart streams</button>
           <button type="button" id="buttonStreamTimeCheck" class="secondary">Stream time check</button>
         </div>
+        <label class="toggle-row">
+          <input id="checkPingEnabled" type="checkbox" />
+          <span>Enable directional ping</span>
+        </label>
         <dl class="stats">
           <div>
             <dt>Queue</dt>
@@ -81,7 +85,7 @@
       <section class="panel">
         <h2>Renderer</h2>
         <p class="muted">
-          This version renders Piper speech, adds the stereo directional ping,
+          This version renders Piper speech, optionally adds the stereo directional ping,
           creates a browser-friendly MP3, and can play the combined WAV locally
           on the Signal K server.
         </p>
