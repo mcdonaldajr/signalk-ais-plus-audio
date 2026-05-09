@@ -1160,20 +1160,82 @@ module.exports = function aisPlusAudio(app) {
 
   function runProcess(command, args, stdin = null) {
     return new Promise((resolve, reject) => {
-      const child = spawn(command, args, { stdio: ["pipe", "ignore", "pipe"] });
-      let stderr = "";
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
-      child.on("error", reject);
+      const tempBase = path.join(
+        os.tmpdir(),
+        `${PLUGIN_ID}-process-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
+      const stdinFile = `${tempBase}.stdin`;
+      const stderrFile = `${tempBase}.stderr`;
+      let stdinFd = null;
+      let stderrFd = null;
+      let finished = false;
+
+      const cleanup = () => {
+        for (const fd of [stdinFd, stderrFd]) {
+          if (fd == null) continue;
+          try {
+            fs.closeSync(fd);
+          } catch {
+            // Best-effort cleanup after child process completion.
+          }
+        }
+        stdinFd = null;
+        stderrFd = null;
+        fs.rm(stdinFile, { force: true }, () => {});
+        fs.rm(stderrFile, { force: true }, () => {});
+      };
+      const readStderr = () => {
+        try {
+          return fs.readFileSync(stderrFile, "utf8").trim();
+        } catch {
+          return "";
+        }
+      };
+      const rejectOnce = (error) => {
+        if (finished) return;
+        finished = true;
+        const stderr = readStderr();
+        cleanup();
+        reject(
+          new Error(
+            stderr
+              ? `${command} failed: ${error.message}: ${stderr}`
+              : `${command} failed: ${error.message}`,
+          ),
+        );
+      };
+
+      try {
+        if (stdin != null) {
+          fs.writeFileSync(stdinFile, stdin);
+          stdinFd = fs.openSync(stdinFile, "r");
+        }
+        stderrFd = fs.openSync(stderrFile, "w");
+      } catch (error) {
+        cleanup();
+        reject(new Error(`${command} failed preparing process IO: ${error.message}`));
+        return;
+      }
+
+      let child;
+      try {
+        child = spawn(command, args, { stdio: [stdinFd ?? "ignore", "ignore", stderrFd] });
+      } catch (error) {
+        rejectOnce(error);
+        return;
+      }
+      child.on("error", rejectOnce);
       child.on("close", (code) => {
+        if (finished) return;
+        finished = true;
+        const stderr = readStderr();
+        cleanup();
         if (code === 0) {
           resolve();
         } else {
-          reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
+          reject(new Error(`${command} exited with code ${code}: ${stderr}`));
         }
       });
-      child.stdin.end(stdin || "");
     });
   }
 
