@@ -122,9 +122,14 @@ function renderStatus(status) {
 }
 
 function renderAplayVolumeControl(status) {
-  const minimum = Number(status.aplayVolumeMinimumPercent) || 25;
-  const value = Math.max(minimum, Math.min(100, Number(status.aplayVolumePercent) || 75));
+  const minimum = Number(status.aplayVolumeMinimumPercent) || 0;
+  const maximum = Number(status.aplayVolumeMaximumPercent) || 100;
+  const value = Math.max(
+    minimum,
+    Math.min(maximum, Number(status.aplayVolumeLevelPercent ?? status.aplayVolumePercent) || 0),
+  );
   aplayVolumeRange.min = String(minimum);
+  aplayVolumeRange.max = String(maximum);
   if (document.activeElement !== aplayVolumeRange) {
     aplayVolumeRange.value = String(Math.round(value));
   }
@@ -134,15 +139,20 @@ function renderAplayVolumeControl(status) {
     aplayVolumeStatus.classList.add("warning");
   } else {
     const control = status.lastAplayVolumeControl || status.aplayVolumeControl || "PCM";
+    const mixerPercent = Math.round(
+      Number(status.aplayMixerVolumePercent ?? status.aplayVolumePercent) || 66,
+    );
     aplayVolumeStatus.textContent = status.lastAplayVolumeSetAt
-      ? `Applied ${formatTime(status.lastAplayVolumeSetAt)} to ${control}.`
-      : `Will apply to ${control} on startup.`;
+      ? `Applied ${formatTime(status.lastAplayVolumeSetAt)}: ${mixerPercent}% mixer on ${control}.`
+      : `Will apply ${mixerPercent}% mixer on ${control} at startup.`;
     aplayVolumeStatus.classList.remove("warning");
   }
 }
 
 function renderAplayVolumeValue(value) {
-  const numeric = Math.max(Number(aplayVolumeRange.min) || 25, Math.min(100, Number(value) || 75));
+  const minimum = Number(aplayVolumeRange.min) || 0;
+  const maximum = Number(aplayVolumeRange.max) || 100;
+  const numeric = Math.max(minimum, Math.min(maximum, Number(value) || 0));
   aplayVolumeValue.textContent = `${Math.round(numeric)}%`;
 }
 

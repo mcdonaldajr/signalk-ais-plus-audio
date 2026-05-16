@@ -9,7 +9,13 @@ const packageInfo = require("../package.json");
 const PLUGIN_ID = "signalk-ais-plus-audio";
 const DEFAULT_AUDIO_DIR = "~/.signalk/ais-plus-audio";
 const STATUS_PATH = "plugins.aisPlusAudio";
-const MIN_APLAY_VOLUME_PERCENT = 25;
+const MIN_APLAY_VOLUME_LEVEL_PERCENT = 0;
+const MAX_APLAY_VOLUME_LEVEL_PERCENT = 100;
+const MIN_APLAY_MIXER_VOLUME_PERCENT = 66;
+const MAX_APLAY_MIXER_VOLUME_PERCENT = 100;
+const DEFAULT_APLAY_MIXER_VOLUME_PERCENT = 75;
+const DEFAULT_APLAY_VOLUME_LEVEL_PERCENT = 53;
+const APLAY_VOLUME_LOG_BASE = 10;
 const DEFAULT_APLAY_VOLUME_CONTROL = "PCM";
 const APLAY_VOLUME_FALLBACK_CONTROLS = ["PCM", "Master", "Headphone", "Speaker"];
 
@@ -64,6 +70,7 @@ module.exports = function aisPlusAudio(app) {
     options = normalizeOptions(initialPluginOptions);
     storedPluginOptions = {
       ...initialPluginOptions,
+      aplayVolumeLevelPercent: options.aplayVolumeLevelPercent,
       aplayVolumePercent: options.aplayVolumePercent,
     };
     ensureAudioDirectory();
@@ -164,14 +171,14 @@ module.exports = function aisPlusAudio(app) {
         description: "Usually aplay on Raspberry Pi OS.",
         default: "aplay",
       },
-      aplayVolumePercent: {
+      aplayVolumeLevelPercent: {
         type: "number",
-        title: "Local speaker volume (%)",
+        title: "Local speaker level (%)",
         description:
-          "Default ALSA mixer volume to apply at AIS Plus Audio startup and before local aplay playback. Values below 25% are raised to 25% so muted hardware is easier to diagnose.",
-        default: 75,
-        minimum: MIN_APLAY_VOLUME_PERCENT,
-        maximum: 100,
+          "Logarithmic default speaker level to apply at AIS Plus Audio startup and before local aplay playback. Level 0 applies 66% to the ALSA mixer, so the local speaker should remain audible.",
+        default: DEFAULT_APLAY_VOLUME_LEVEL_PERCENT,
+        minimum: MIN_APLAY_VOLUME_LEVEL_PERCENT,
+        maximum: MAX_APLAY_VOLUME_LEVEL_PERCENT,
       },
       aplayVolumeCommand: {
         type: "string",
@@ -385,11 +392,21 @@ module.exports = function aisPlusAudio(app) {
     });
 
     router.post("/aplay-volume", async (req, res) => {
-      const requested = req.body?.volumePercent ?? req.query.volume ?? req.query.percent;
-      const volumePercent = normalizeAplayVolumePercent(requested);
-      options.aplayVolumePercent = volumePercent;
+      const requested =
+        req.body?.volumeLevelPercent ??
+        req.body?.volumePercent ??
+        req.query.level ??
+        req.query.volume ??
+        req.query.percent;
+      const volumeLevelPercent = normalizeAplayVolumeLevelPercent(requested);
+      options.aplayVolumeLevelPercent = volumeLevelPercent;
+      options.aplayVolumePercent = aplayVolumeLevelToMixerPercent(volumeLevelPercent);
       try {
-        await savePluginOptions({ ...storedPluginOptions, aplayVolumePercent: volumePercent });
+        await savePluginOptions({
+          ...storedPluginOptions,
+          aplayVolumeLevelPercent: options.aplayVolumeLevelPercent,
+          aplayVolumePercent: options.aplayVolumePercent,
+        });
       } catch (error) {
         res.status(500).json({ error: `Volume save failed: ${error.message}` });
         return;
@@ -408,6 +425,7 @@ module.exports = function aisPlusAudio(app) {
         ok: true,
         applied,
         error: errorMessage,
+        aplayVolumeLevelPercent: options.aplayVolumeLevelPercent,
         aplayVolumePercent: options.aplayVolumePercent,
         status: buildStatus(),
       });
@@ -458,7 +476,13 @@ module.exports = function aisPlusAudio(app) {
       piperBinary: expandHome(String(value.piperBinary || "piper")),
       ffmpegBinary: expandHome(String(value.ffmpegBinary || "ffmpeg")),
       audioPlayer: expandHome(String(value.audioPlayer || "aplay")),
-      aplayVolumePercent: normalizeAplayVolumePercent(value.aplayVolumePercent),
+      aplayVolumeLevelPercent: normalizeAplayVolumeLevelPercent(
+        value.aplayVolumeLevelPercent,
+        value.aplayVolumePercent,
+      ),
+      aplayVolumePercent: aplayVolumeLevelToMixerPercent(
+        normalizeAplayVolumeLevelPercent(value.aplayVolumeLevelPercent, value.aplayVolumePercent),
+      ),
       aplayVolumeCommand: expandHome(
         String(value.aplayVolumeCommand == null ? "amixer" : value.aplayVolumeCommand),
       ),
@@ -756,8 +780,13 @@ module.exports = function aisPlusAudio(app) {
       streamHealthIntervalMinutes: options.streamHealthIntervalMinutes,
       masterVolumePercent: options.masterVolumePercent,
       speechVolumePercent: options.speechVolumePercent,
+      aplayVolumeLevelPercent: options.aplayVolumeLevelPercent,
+      aplayVolumeMinimumPercent: MIN_APLAY_VOLUME_LEVEL_PERCENT,
+      aplayVolumeMaximumPercent: MAX_APLAY_VOLUME_LEVEL_PERCENT,
       aplayVolumePercent: options.aplayVolumePercent,
-      aplayVolumeMinimumPercent: MIN_APLAY_VOLUME_PERCENT,
+      aplayMixerVolumePercent: options.aplayVolumePercent,
+      aplayMixerMinimumPercent: MIN_APLAY_MIXER_VOLUME_PERCENT,
+      aplayMixerMaximumPercent: MAX_APLAY_MIXER_VOLUME_PERCENT,
       aplayVolumeCommand: options.aplayVolumeCommand,
       aplayVolumeControl: options.aplayVolumeControl,
       lastAplayVolumeSetAt,
@@ -1252,7 +1281,12 @@ module.exports = function aisPlusAudio(app) {
       lastAplayVolumeControl = "";
       return false;
     }
-    const volumePercent = normalizeAplayVolumePercent(options.aplayVolumePercent);
+    options.aplayVolumeLevelPercent = normalizeAplayVolumeLevelPercent(
+      options.aplayVolumeLevelPercent,
+      options.aplayVolumePercent,
+    );
+    const volumePercent = aplayVolumeLevelToMixerPercent(options.aplayVolumeLevelPercent);
+    options.aplayVolumePercent = volumePercent;
     let lastError = null;
     for (const control of aplayVolumeControlCandidates(options.aplayVolumeControl)) {
       try {
@@ -1262,9 +1296,14 @@ module.exports = function aisPlusAudio(app) {
         lastAplayVolumeError = "";
         lastAplayVolumeControl = control;
         if (reason !== "playback") {
-          addRecent("volume", `Local speaker volume set to ${volumePercent}% on ${control} (${reason})`);
+          addRecent(
+            "volume",
+            `Local speaker level ${Math.round(options.aplayVolumeLevelPercent)}% set ${control} to ${volumePercent}% (${reason})`,
+          );
         } else {
-          debug(`Local speaker volume set to ${volumePercent}% on ${control} before playback`);
+          debug(
+            `Local speaker level ${Math.round(options.aplayVolumeLevelPercent)}% set ${control} to ${volumePercent}% before playback`,
+          );
         }
         return true;
       } catch (error) {
@@ -1588,8 +1627,56 @@ module.exports = function aisPlusAudio(app) {
     return fallbackPercent;
   }
 
-  function normalizeAplayVolumePercent(value) {
-    return clampNumber(value, MIN_APLAY_VOLUME_PERCENT, 100, 75);
+  function normalizeAplayVolumeLevelPercent(value, legacyMixerPercent) {
+    const level = Number(value);
+    if (Number.isFinite(level)) {
+      return clampNumber(
+        level,
+        MIN_APLAY_VOLUME_LEVEL_PERCENT,
+        MAX_APLAY_VOLUME_LEVEL_PERCENT,
+        DEFAULT_APLAY_VOLUME_LEVEL_PERCENT,
+      );
+    }
+    if (legacyMixerPercent == null || legacyMixerPercent === "") {
+      return DEFAULT_APLAY_VOLUME_LEVEL_PERCENT;
+    }
+    const mixerPercent = Number(legacyMixerPercent);
+    if (Number.isFinite(mixerPercent)) {
+      return aplayMixerPercentToVolumeLevel(mixerPercent);
+    }
+    return DEFAULT_APLAY_VOLUME_LEVEL_PERCENT;
+  }
+
+  function aplayVolumeLevelToMixerPercent(value) {
+    const level =
+      clampNumber(
+        value,
+        MIN_APLAY_VOLUME_LEVEL_PERCENT,
+        MAX_APLAY_VOLUME_LEVEL_PERCENT,
+        DEFAULT_APLAY_VOLUME_LEVEL_PERCENT,
+      ) / MAX_APLAY_VOLUME_LEVEL_PERCENT;
+    const curved = (Math.pow(APLAY_VOLUME_LOG_BASE, level) - 1) / (APLAY_VOLUME_LOG_BASE - 1);
+    return Math.round(
+      MIN_APLAY_MIXER_VOLUME_PERCENT +
+        (MAX_APLAY_MIXER_VOLUME_PERCENT - MIN_APLAY_MIXER_VOLUME_PERCENT) * curved,
+    );
+  }
+
+  function aplayMixerPercentToVolumeLevel(value) {
+    const mixerPercent = clampNumber(
+      value,
+      MIN_APLAY_MIXER_VOLUME_PERCENT,
+      MAX_APLAY_MIXER_VOLUME_PERCENT,
+      DEFAULT_APLAY_MIXER_VOLUME_PERCENT,
+    );
+    const normalized =
+      (mixerPercent - MIN_APLAY_MIXER_VOLUME_PERCENT) /
+      (MAX_APLAY_MIXER_VOLUME_PERCENT - MIN_APLAY_MIXER_VOLUME_PERCENT);
+    return Math.round(
+      (Math.log10(1 + normalized * (APLAY_VOLUME_LOG_BASE - 1)) /
+        Math.log10(APLAY_VOLUME_LOG_BASE)) *
+        MAX_APLAY_VOLUME_LEVEL_PERCENT,
+    );
   }
 
   function aplayVolumeControlCandidates(value) {
