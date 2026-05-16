@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AIS Plus Audio</title>
-    <link rel="stylesheet" href="./styles.css?v=0.3.14" />
-    <script defer src="./app.js?v=0.3.14"></script>
+    <link rel="stylesheet" href="./styles.css?v=1.1.0" />
+    <script defer src="./app.js?v=1.1.0"></script>
   </head>
   <body>
     <main>
@@ -30,6 +30,14 @@
           <input id="checkPingEnabled" type="checkbox" />
           <span>Enable directional ping</span>
         </label>
+        <div class="slider-control">
+          <label for="aplayVolumeRange">
+            <span>Local speaker volume</span>
+            <output id="aplayVolumeValue">--%</output>
+          </label>
+          <input id="aplayVolumeRange" type="range" min="25" max="100" step="1" value="75" />
+          <p class="muted" id="aplayVolumeStatus">Startup volume for local aplay output.</p>
+        </div>
         <dl class="stats">
           <div>
             <dt>Queue</dt>

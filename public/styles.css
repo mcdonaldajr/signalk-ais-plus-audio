@@ -119,6 +119,37 @@ button.secondary {
   block-size: 1.2rem;
 }
 
+.slider-control {
+  background: #0b1423;
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+}
+
+.slider-control label {
+  align-items: center;
+  color: #e2e8f0;
+  display: flex;
+  font-weight: 800;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.slider-control output {
+  color: #67e8f9;
+  font-weight: 900;
+}
+
+.slider-control input[type="range"] {
+  inline-size: 100%;
+}
+
+.warning {
+  color: #fbbf24;
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -16,9 +16,9 @@ AIS Plus announcement event
 
 ## Current State
 
-Version `0.3.14` renders Piper WAV announcements, can prepend the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, publishes read-only status at `vessels.self.plugins.aisPlusAudio`, can play the combined WAV locally on the Signal K server, and exposes generated files plus a continuous radio-style MP3 stream on the public stream port for read-only clients.
+Version `1.1.0` renders Piper WAV announcements, can prepend the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, publishes read-only status at `vessels.self.plugins.aisPlusAudio`, can play the combined WAV locally on the Signal K server, and exposes generated files plus a continuous radio-style MP3 stream on the public stream port for read-only clients.
 
-Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
+Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. The local speaker volume setting applies the configured ALSA mixer volume at AIS Plus Audio startup and before local `aplay` playback; values below `25%` are raised to `25%` so a silent mixer is easier to diagnose. It tries the configured mixer control first, then common Pi/ALSA controls such as `PCM`, `Master`, `Headphone`, and `Speaker`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
 
 The radio stream is intended for iPhone/iPad/Android apps that can keep a stream alive while the device is locked.
 
@@ -26,13 +26,13 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v0.3.14 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v1.1.0 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
 Open **AIS Plus Audio** from the Signal K webapps page.
 
-The **Enable directional ping** checkbox in the AIS Plus Audio webapp can switch the ping on or off immediately while Signal K is running. The Signal K plugin configuration still provides the startup default and ping volume/frequency settings.
+The **Enable directional ping** checkbox in the AIS Plus Audio webapp can switch the ping on or off immediately while Signal K is running. The **Local speaker volume** slider sets and saves the default ALSA mixer volume for local `aplay` output, with a minimum of `25%`. The Signal K plugin configuration still provides the startup defaults and ping volume/frequency settings.
 
 ## Radio Stream
 

@@ -9,14 +9,21 @@ const packageInfo = require("../package.json");
 const PLUGIN_ID = "signalk-ais-plus-audio";
 const DEFAULT_AUDIO_DIR = "~/.signalk/ais-plus-audio";
 const STATUS_PATH = "plugins.aisPlusAudio";
+const MIN_APLAY_VOLUME_PERCENT = 25;
+const DEFAULT_APLAY_VOLUME_CONTROL = "PCM";
+const APLAY_VOLUME_FALLBACK_CONTROLS = ["PCM", "Master", "Headphone", "Speaker"];
 
 module.exports = function aisPlusAudio(app) {
   const plugin = {};
   let options = {};
+  let storedPluginOptions = {};
   let unsubscribes = [];
   let queue = [];
   let active = null;
   let lastAnnouncement = null;
+  let lastAplayVolumeSetAt = null;
+  let lastAplayVolumeError = "";
+  let lastAplayVolumeControl = "";
   let recentEvents = [];
   let liveSilenceTimer = null;
   let liveSilenceFile = null;
@@ -53,9 +60,16 @@ module.exports = function aisPlusAudio(app) {
   plugin.description =
     "Renders AIS Plus announcement events into Piper audio for local speaker and browser clients.";
 
-  plugin.start = (pluginOptions = {}) => {
-    options = normalizeOptions(pluginOptions);
+  plugin.start = (initialPluginOptions = {}) => {
+    options = normalizeOptions(initialPluginOptions);
+    storedPluginOptions = {
+      ...initialPluginOptions,
+      aplayVolumePercent: options.aplayVolumePercent,
+    };
     ensureAudioDirectory();
+    applyAplayVolume("startup").catch((error) => {
+      addRecent("warning", `Local speaker volume not applied on startup: ${error.message}`);
+    });
     startPublicStreamServer();
     startStreamHealthTimer();
     startStatusPublisher();
@@ -149,6 +163,29 @@ module.exports = function aisPlusAudio(app) {
         title: "Local audio player",
         description: "Usually aplay on Raspberry Pi OS.",
         default: "aplay",
+      },
+      aplayVolumePercent: {
+        type: "number",
+        title: "Local speaker volume (%)",
+        description:
+          "Default ALSA mixer volume to apply at AIS Plus Audio startup and before local aplay playback. Values below 25% are raised to 25% so muted hardware is easier to diagnose.",
+        default: 75,
+        minimum: MIN_APLAY_VOLUME_PERCENT,
+        maximum: 100,
+      },
+      aplayVolumeCommand: {
+        type: "string",
+        title: "Local speaker mixer command",
+        description:
+          "Usually amixer on Raspberry Pi OS. Leave blank to disable hardware mixer volume control.",
+        default: "amixer",
+      },
+      aplayVolumeControl: {
+        type: "string",
+        title: "Local speaker mixer control",
+        description:
+          "Usually PCM on Raspberry Pi OS. AIS Plus Audio will also try Master, Headphone, and Speaker if the configured control is not present.",
+        default: DEFAULT_APLAY_VOLUME_CONTROL,
       },
       voicesDir: {
         type: "string",
@@ -347,6 +384,35 @@ module.exports = function aisPlusAudio(app) {
       res.json({ ok: true, pingEnabled: options.pingEnabled, status: buildStatus() });
     });
 
+    router.post("/aplay-volume", async (req, res) => {
+      const requested = req.body?.volumePercent ?? req.query.volume ?? req.query.percent;
+      const volumePercent = normalizeAplayVolumePercent(requested);
+      options.aplayVolumePercent = volumePercent;
+      try {
+        await savePluginOptions({ ...storedPluginOptions, aplayVolumePercent: volumePercent });
+      } catch (error) {
+        res.status(500).json({ error: `Volume save failed: ${error.message}` });
+        return;
+      }
+      let applied = false;
+      let errorMessage = "";
+      try {
+        applied = await applyAplayVolume("webapp");
+      } catch (error) {
+        applied = false;
+        errorMessage = error.message;
+        addRecent("warning", `Local speaker volume saved but not applied: ${error.message}`);
+      }
+      publishStatus();
+      res.json({
+        ok: true,
+        applied,
+        error: errorMessage,
+        aplayVolumePercent: options.aplayVolumePercent,
+        status: buildStatus(),
+      });
+    });
+
     router.post("/clear-queue", (_req, res) => {
       queue = [];
       addRecent("queue-cleared", "Announcement queue cleared");
@@ -392,6 +458,16 @@ module.exports = function aisPlusAudio(app) {
       piperBinary: expandHome(String(value.piperBinary || "piper")),
       ffmpegBinary: expandHome(String(value.ffmpegBinary || "ffmpeg")),
       audioPlayer: expandHome(String(value.audioPlayer || "aplay")),
+      aplayVolumePercent: normalizeAplayVolumePercent(value.aplayVolumePercent),
+      aplayVolumeCommand: expandHome(
+        String(value.aplayVolumeCommand == null ? "amixer" : value.aplayVolumeCommand),
+      ),
+      aplayVolumeControl:
+        String(
+          value.aplayVolumeControl == null
+            ? DEFAULT_APLAY_VOLUME_CONTROL
+            : value.aplayVolumeControl,
+        ).trim() || DEFAULT_APLAY_VOLUME_CONTROL,
       voicesDir: String(value.voicesDir || "~/piper-voices"),
       voice: String(value.voice || "en_GB-alan-medium"),
       audioDirectory: String(value.audioDirectory || DEFAULT_AUDIO_DIR),
@@ -680,6 +756,13 @@ module.exports = function aisPlusAudio(app) {
       streamHealthIntervalMinutes: options.streamHealthIntervalMinutes,
       masterVolumePercent: options.masterVolumePercent,
       speechVolumePercent: options.speechVolumePercent,
+      aplayVolumePercent: options.aplayVolumePercent,
+      aplayVolumeMinimumPercent: MIN_APLAY_VOLUME_PERCENT,
+      aplayVolumeCommand: options.aplayVolumeCommand,
+      aplayVolumeControl: options.aplayVolumeControl,
+      lastAplayVolumeSetAt,
+      lastAplayVolumeError,
+      lastAplayVolumeControl,
       pingEnabled: options.pingEnabled,
       pingVolumePercent: options.pingVolumePercent,
       queueLength: queue.length,
@@ -1154,8 +1237,61 @@ module.exports = function aisPlusAudio(app) {
     return `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${port}`;
   }
 
-  function playLocalWav(file) {
+  async function playLocalWav(file) {
+    try {
+      await applyAplayVolume("playback");
+    } catch (error) {
+      addRecent("warning", `Local speaker volume not applied before playback: ${error.message}`);
+    }
     return runProcess(options.audioPlayer, [file]);
+  }
+
+  async function applyAplayVolume(reason) {
+    if (!options.localPlayback || !options.aplayVolumeCommand) {
+      lastAplayVolumeError = "";
+      lastAplayVolumeControl = "";
+      return false;
+    }
+    const volumePercent = normalizeAplayVolumePercent(options.aplayVolumePercent);
+    let lastError = null;
+    for (const control of aplayVolumeControlCandidates(options.aplayVolumeControl)) {
+      try {
+        await runProcess(options.aplayVolumeCommand, ["sset", control, `${volumePercent}%`]);
+        options.aplayVolumePercent = volumePercent;
+        lastAplayVolumeSetAt = new Date().toISOString();
+        lastAplayVolumeError = "";
+        lastAplayVolumeControl = control;
+        if (reason !== "playback") {
+          addRecent("volume", `Local speaker volume set to ${volumePercent}% on ${control} (${reason})`);
+        } else {
+          debug(`Local speaker volume set to ${volumePercent}% on ${control} before playback`);
+        }
+        return true;
+      } catch (error) {
+        lastError = error;
+        debug(`Local speaker volume control ${control} failed: ${error.message}`);
+      }
+    }
+    lastAplayVolumeError = lastError?.message || "No ALSA mixer volume control succeeded";
+    lastAplayVolumeControl = "";
+    throw new Error(lastAplayVolumeError);
+  }
+
+  function savePluginOptions(nextOptions) {
+    return new Promise((resolve, reject) => {
+      if (typeof app.savePluginOptions !== "function") {
+        reject(new Error("Signal K savePluginOptions is not available"));
+        return;
+      }
+      app.savePluginOptions(nextOptions, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        storedPluginOptions = nextOptions;
+        resolve();
+      });
+    });
   }
 
   function runProcess(command, args, stdin = null) {
@@ -1450,6 +1586,16 @@ module.exports = function aisPlusAudio(app) {
       return Math.min(maxPercent, Math.max(0, legacyGain * 100));
     }
     return fallbackPercent;
+  }
+
+  function normalizeAplayVolumePercent(value) {
+    return clampNumber(value, MIN_APLAY_VOLUME_PERCENT, 100, 75);
+  }
+
+  function aplayVolumeControlCandidates(value) {
+    const preferred = String(value || DEFAULT_APLAY_VOLUME_CONTROL).trim();
+    const candidates = [preferred, ...APLAY_VOLUME_FALLBACK_CONTROLS];
+    return candidates.filter((control, index) => control && candidates.indexOf(control) === index);
   }
 
   function clampPcm16(value) {

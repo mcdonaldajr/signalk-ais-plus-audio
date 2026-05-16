@@ -14,6 +14,9 @@ const streamUrl = document.getElementById("streamUrl");
 const streamDiagnostics = document.getElementById("streamDiagnostics");
 const events = document.getElementById("events");
 const checkPingEnabled = document.getElementById("checkPingEnabled");
+const aplayVolumeRange = document.getElementById("aplayVolumeRange");
+const aplayVolumeValue = document.getElementById("aplayVolumeValue");
+const aplayVolumeStatus = document.getElementById("aplayVolumeStatus");
 
 document.getElementById("buttonSoundCheck").addEventListener("click", () => postJson("sound-check"));
 document.getElementById("buttonRepeatLast").addEventListener("click", () => postJson("repeat-last"));
@@ -22,6 +25,17 @@ document.getElementById("buttonRestartStreams").addEventListener("click", () => 
 document.getElementById("buttonStreamTimeCheck").addEventListener("click", () => postJson("stream-time-check"));
 checkPingEnabled.addEventListener("change", () =>
   postJson(`ping-enabled?enabled=${checkPingEnabled.checked ? "true" : "false"}`).catch(
+    (error) => {
+      renderEvents([{ event: "error", message: error.message, ts: new Date().toISOString() }]);
+      refresh();
+    },
+  ),
+);
+aplayVolumeRange.addEventListener("input", () => {
+  renderAplayVolumeValue(aplayVolumeRange.value);
+});
+aplayVolumeRange.addEventListener("change", () =>
+  postJson(`aplay-volume?volume=${encodeURIComponent(aplayVolumeRange.value)}`).catch(
     (error) => {
       renderEvents([{ event: "error", message: error.message, ts: new Date().toISOString() }]);
       refresh();
@@ -52,11 +66,12 @@ async function getJson(path) {
   return response.json();
 }
 
-async function postJson(path) {
+async function postJson(path, body = null) {
   const response = await fetch(`/plugins/signalk-ais-plus-audio/${path}`, {
     credentials: "include",
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -77,6 +92,7 @@ function renderStatus(status) {
   streamConnectedTotal.textContent = status.streamStats?.connectedTotal ?? 0;
   streamDisconnectedTotal.textContent = status.streamStats?.disconnectedTotal ?? 0;
   checkPingEnabled.checked = status.pingEnabled !== false;
+  renderAplayVolumeControl(status);
   audioDirectory.textContent = status.audioDirectory || "";
   streamUrl.textContent =
     status.publicStreamUrl ||
@@ -103,6 +119,31 @@ function renderStatus(status) {
   }
 
   renderEvents(status.recentEvents || []);
+}
+
+function renderAplayVolumeControl(status) {
+  const minimum = Number(status.aplayVolumeMinimumPercent) || 25;
+  const value = Math.max(minimum, Math.min(100, Number(status.aplayVolumePercent) || 75));
+  aplayVolumeRange.min = String(minimum);
+  if (document.activeElement !== aplayVolumeRange) {
+    aplayVolumeRange.value = String(Math.round(value));
+  }
+  renderAplayVolumeValue(aplayVolumeRange.value);
+  if (status.lastAplayVolumeError) {
+    aplayVolumeStatus.textContent = `Last apply failed: ${status.lastAplayVolumeError}`;
+    aplayVolumeStatus.classList.add("warning");
+  } else {
+    const control = status.lastAplayVolumeControl || status.aplayVolumeControl || "PCM";
+    aplayVolumeStatus.textContent = status.lastAplayVolumeSetAt
+      ? `Applied ${formatTime(status.lastAplayVolumeSetAt)} to ${control}.`
+      : `Will apply to ${control} on startup.`;
+    aplayVolumeStatus.classList.remove("warning");
+  }
+}
+
+function renderAplayVolumeValue(value) {
+  const numeric = Math.max(Number(aplayVolumeRange.min) || 25, Math.min(100, Number(value) || 75));
+  aplayVolumeValue.textContent = `${Math.round(numeric)}%`;
 }
 
 function formatStreamDiagnostics(status) {
