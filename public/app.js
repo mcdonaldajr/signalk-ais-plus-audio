@@ -1,6 +1,12 @@
 window.__aisPlusAudioAppStarted = true;
 
 const API = "/signalk/v1/api/aisPlusAudio";
+const LOGIN_URL = "/admin/#/login";
+const LOGIN_STATUS_URLS = ["/skServer/loginStatus", "/loginStatus"];
+const ACCESS_REQUEST_URL = "/signalk/v1/access/requests";
+const ACCESS_TOKEN_STORAGE_KEY = "aisPlusAudio.accessToken";
+const ACCESS_REQUEST_STORAGE_KEY = "aisPlusAudio.accessRequestHref";
+const CLIENT_ID_STORAGE_KEY = "aisPlusAudio.clientId";
 const REQUEST_TIMEOUT_MS = 8000;
 const statusPill = document.getElementById("statusPill");
 const queueLength = document.getElementById("queueLength");
@@ -21,6 +27,9 @@ const checkPingEnabled = document.getElementById("checkPingEnabled");
 const aplayVolumeRange = document.getElementById("aplayVolumeRange");
 const aplayVolumeValue = document.getElementById("aplayVolumeValue");
 const aplayVolumeStatus = document.getElementById("aplayVolumeStatus");
+let accessToken = readStoredValue(ACCESS_TOKEN_STORAGE_KEY);
+let accessRequestTimer = null;
+let localNotice = null;
 
 window.addEventListener("error", (event) => {
   renderStartupError(event.message || "AIS Plus Audio browser script failed");
@@ -30,11 +39,21 @@ window.addEventListener("unhandledrejection", (event) => {
   renderStartupError(reason.message || String(reason) || "AIS Plus Audio request failed");
 });
 
-document.getElementById("buttonSoundCheck").addEventListener("click", () => postJson("sound-check"));
-document.getElementById("buttonRepeatLast").addEventListener("click", () => postJson("repeat-last"));
-document.getElementById("buttonClearQueue").addEventListener("click", () => postJson("clear-queue"));
-document.getElementById("buttonRestartStreams").addEventListener("click", () => postJson("restart-streams"));
-document.getElementById("buttonStreamTimeCheck").addEventListener("click", () => postJson("stream-time-check"));
+document.getElementById("buttonSoundCheck").addEventListener("click", () => {
+  postJson("sound-check").catch(renderCommandError);
+});
+document.getElementById("buttonRepeatLast").addEventListener("click", () => {
+  postJson("repeat-last").catch(renderCommandError);
+});
+document.getElementById("buttonClearQueue").addEventListener("click", () => {
+  postJson("clear-queue").catch(renderCommandError);
+});
+document.getElementById("buttonRestartStreams").addEventListener("click", () => {
+  postJson("restart-streams").catch(renderCommandError);
+});
+document.getElementById("buttonStreamTimeCheck").addEventListener("click", () => {
+  postJson("stream-time-check").catch(renderCommandError);
+});
 checkPingEnabled.addEventListener("change", () => {
   postJson(`ping-enabled?enabled=${checkPingEnabled.checked ? "true" : "false"}`).catch(
     renderCommandError,
@@ -50,6 +69,7 @@ aplayVolumeRange.addEventListener("change", () => {
 });
 
 refresh();
+resumeAccessRequestPolling();
 setInterval(refresh, 2000);
 
 async function refresh() {
@@ -67,6 +87,7 @@ async function getJson(path) {
   const response = await fetchWithTimeout(`${API}/${path}`, {
     credentials: "include",
     cache: "no-store",
+    headers: authHeaders(),
   });
   if (!response.ok) throw new Error(`${path} failed: HTTP ${response.status}`);
   return response.json();
@@ -76,14 +97,23 @@ async function postJson(path, body = null) {
   const response = await fetchWithTimeout(`${API}/${path}`, {
     credentials: "include",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || `${path} failed: HTTP ${response.status}`);
-  }
+  await readResponse(response, path);
   await refresh();
+}
+
+async function readResponse(response, path) {
+  const text = await response.text();
+  const body = text ? parseJson(text) : {};
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw await audioAccessError(response.status, body, text);
+    }
+    throw new Error(body.error || `${path} failed: ${friendlyHttpError(response.status, text)}`);
+  }
+  return body;
 }
 
 function renderStatus(status) {
@@ -200,9 +230,10 @@ function formatDuration(seconds) {
 }
 
 function renderEvents(items) {
-  events.classList.toggle("empty", items.length === 0);
-  events.innerHTML = items.length
-    ? items
+  const allItems = localNotice ? [localNotice].concat(items) : items;
+  events.classList.toggle("empty", allItems.length === 0);
+  events.innerHTML = allItems.length
+    ? allItems
         .map(
           (item) => `
             <article>
@@ -230,8 +261,12 @@ function escapeHtml(value) {
 }
 
 function renderCommandError(error) {
-  renderEvents([{ event: "error", message: error.message, ts: new Date().toISOString() }]);
-  refresh();
+  if (error.canRequestAccess) {
+    requestSignalKAccess(error.commandLabel || "AIS Plus Audio control");
+    return;
+  }
+  localNotice = { event: "error", message: error.message, ts: new Date().toISOString() };
+  renderEvents([]);
 }
 
 function renderStartupError(message) {
@@ -271,4 +306,202 @@ function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
       window.setTimeout(() => reject(new Error(`Timed out waiting for ${url}`)), timeoutMs);
     }),
   ]);
+}
+
+function authHeaders(headers = {}) {
+  return accessToken
+    ? Object.assign({}, headers, { Authorization: `Bearer ${accessToken}` })
+    : headers;
+}
+
+async function audioAccessError(status, body, text) {
+  const loginStatus = await readLoginStatus();
+  const error = new Error(audioAccessMessage(status, body, text, loginStatus));
+  error.status = status;
+  error.canRequestAccess = loginStatus && loginStatus.allowDeviceAccessRequests === true;
+  error.loginUrl = LOGIN_URL;
+  if (status === 401 && accessToken) {
+    accessToken = "";
+    removeStoredValue(ACCESS_TOKEN_STORAGE_KEY);
+  }
+  return error;
+}
+
+async function readLoginStatus() {
+  for (const url of LOGIN_STATUS_URLS) {
+    try {
+      const response = await fetchWithTimeout(url, {
+        cache: "no-store",
+        credentials: "include",
+      }, 4000);
+      if (response.ok) return await response.json();
+    } catch (_error) {
+      // Try the next Signal K login-status route.
+    }
+  }
+  return null;
+}
+
+function audioAccessMessage(status, body, text, loginStatus) {
+  if (body && body.error) return body.error;
+  if (loginStatus && loginStatus.authenticationRequired === false) {
+    return `Signal K refused AIS Plus Audio access: ${friendlyHttpError(status, text)}`;
+  }
+  if (status === 403) {
+    return "AIS Plus Audio controls require Signal K read/write or admin access.";
+  }
+  if (!loginStatus || loginStatus.status !== "loggedIn") {
+    return "AIS Plus Audio needs a Signal K login or approved device token.";
+  }
+  const userLevel = (loginStatus && loginStatus.userLevel) || "non-admin";
+  return `AIS Plus Audio controls require Signal K read/write or admin access. Current user level: ${userLevel}.`;
+}
+
+function parseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    return {};
+  }
+}
+
+function friendlyHttpError(status, text) {
+  if (status === 401 || status === 403) {
+    return "Signal K login required or this user is not allowed to control AIS Plus Audio.";
+  }
+  const cleaned = String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return cleaned || `HTTP ${status}`;
+}
+
+async function requestSignalKAccess(label) {
+  const pendingHref = readStoredValue(ACCESS_REQUEST_STORAGE_KEY);
+  if (pendingHref) {
+    pollAccessRequest(pendingHref);
+    localNotice = {
+      event: "access",
+      message: `${label} needs write access. Approve the pending AIS Plus Audio request in Signal K Access Requests.`,
+      ts: new Date().toISOString(),
+    };
+    renderEvents([]);
+    return true;
+  }
+  try {
+    const response = await fetchWithTimeout(ACCESS_REQUEST_URL, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: getClientId(),
+        description: "AIS Plus Audio browser",
+        permissions: "readwrite",
+      }),
+    });
+    const text = await response.text();
+    const body = text ? parseJson(text) : {};
+    if (!response.ok) {
+      const duplicate = String(body.message || body.error || text || "").includes(
+        "already requested",
+      );
+      if (!duplicate) {
+        throw new Error(body.message || body.error || friendlyHttpError(response.status, text));
+      }
+    }
+    if (body.href) {
+      writeStoredValue(ACCESS_REQUEST_STORAGE_KEY, body.href);
+      pollAccessRequest(body.href);
+    }
+    localNotice = {
+      event: "access",
+      message: `${label} needs write access. Approve AIS Plus Audio in Signal K Access Requests, then try again.`,
+      ts: new Date().toISOString(),
+    };
+    renderEvents([]);
+    return true;
+  } catch (requestError) {
+    localNotice = {
+      event: "error",
+      message: `${label} failed: ${requestError.message}`,
+      ts: new Date().toISOString(),
+    };
+    renderEvents([]);
+    return true;
+  }
+}
+
+function resumeAccessRequestPolling() {
+  const pendingHref = readStoredValue(ACCESS_REQUEST_STORAGE_KEY);
+  if (pendingHref) pollAccessRequest(pendingHref);
+}
+
+function pollAccessRequest(href) {
+  window.clearTimeout(accessRequestTimer);
+  accessRequestTimer = window.setTimeout(async () => {
+    try {
+      const response = await fetchWithTimeout(href, {
+        cache: "no-store",
+        credentials: "include",
+      }, 4000);
+      const body = await response.json();
+      if (body.state === "PENDING") {
+        pollAccessRequest(href);
+        return;
+      }
+      removeStoredValue(ACCESS_REQUEST_STORAGE_KEY);
+      const token = body.accessRequest && body.accessRequest.token;
+      if (token) {
+        accessToken = token;
+        writeStoredValue(ACCESS_TOKEN_STORAGE_KEY, token);
+        localNotice = {
+          event: "access",
+          message: "AIS Plus Audio write access approved.",
+          ts: new Date().toISOString(),
+        };
+        await refresh();
+        return;
+      }
+      localNotice = {
+        event: "access",
+        message: "AIS Plus Audio write access was not approved.",
+        ts: new Date().toISOString(),
+      };
+      renderEvents([]);
+    } catch (_error) {
+      pollAccessRequest(href);
+    }
+  }, 2000);
+}
+
+function getClientId() {
+  const existing = readStoredValue(CLIENT_ID_STORAGE_KEY);
+  if (existing) return existing;
+  const generated = window.crypto && window.crypto.randomUUID
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const clientId = `ais-plus-audio-${generated}`;
+  writeStoredValue(CLIENT_ID_STORAGE_KEY, clientId);
+  return clientId;
+}
+
+function readStoredValue(key) {
+  try {
+    return window.localStorage.getItem(key) || "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function writeStoredValue(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (_error) {
+    // Private browsing or locked-down clients can still use an admin session.
+  }
+}
+
+function removeStoredValue(key) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch (_error) {
+    // Ignore storage failures.
+  }
 }
