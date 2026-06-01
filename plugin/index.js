@@ -320,11 +320,28 @@ module.exports = function aisPlusAudio(app) {
   };
 
   plugin.registerWithRouter = (router) => {
-    router.get("/status", (_req, res) => {
+    registerRoutes(router);
+  };
+
+  plugin.signalKApiRoutes = (router) => {
+    registerRoutes(router, {
+      prefix: "/aisPlusAudio",
+      requireWriteAccess: true,
+    });
+    return router;
+  };
+
+  return plugin;
+
+  function registerRoutes(router, routeOptions = {}) {
+    const prefix = routeOptions.prefix || "";
+    const write = routeOptions.requireWriteAccess ? requireWriteAccess : (handler) => handler;
+
+    router.get(`${prefix}/status`, (_req, res) => {
       res.json(buildStatus());
     });
 
-    router.get("/live.mp3", async (_req, res) => {
+    router.get(`${prefix}/live.mp3`, async (_req, res) => {
       if (!options.liveStream) {
         res.status(404).json({ error: "Live stream is disabled." });
         return;
@@ -341,14 +358,14 @@ module.exports = function aisPlusAudio(app) {
       }
     });
 
-    router.get("/live.m3u", (req, res) => {
+    router.get(`${prefix}/live.m3u`, (req, res) => {
       const streamUrl = absolutePluginUrl(req, "/live.mp3");
       res.setHeader("Content-Type", "audio/x-mpegurl; charset=utf-8");
       res.setHeader("Cache-Control", "no-store");
       res.send(`#EXTM3U\n#EXTINF:-1,AIS Plus Audio\n${streamUrl}\n`);
     });
 
-    router.get("/audio/:file", (req, res) => {
+    router.get(`${prefix}/audio/:file`, (req, res) => {
       const file = path.basename(req.params.file || "");
       if (!file.endsWith(".mp3")) {
         res.status(404).json({ error: "Audio file not found." });
@@ -364,7 +381,7 @@ module.exports = function aisPlusAudio(app) {
       fs.createReadStream(filePath).pipe(res);
     });
 
-    router.post("/sound-check", (_req, res) => {
+    router.post(`${prefix}/sound-check`, write((_req, res) => {
       const entry = normalizeAnnouncement({
         id: `sound-check-${Date.now()}`,
         ts: new Date().toISOString(),
@@ -378,9 +395,9 @@ module.exports = function aisPlusAudio(app) {
       });
       enqueue(entry);
       res.json({ ok: true, announcement: entry });
-    });
+    }));
 
-    router.post("/ping-enabled", (req, res) => {
+    router.post(`${prefix}/ping-enabled`, write((req, res) => {
       const enabled = String(req.query.enabled || "").toLowerCase() === "true";
       options.pingEnabled = enabled;
       addRecent(
@@ -389,9 +406,9 @@ module.exports = function aisPlusAudio(app) {
       );
       publishStatus();
       res.json({ ok: true, pingEnabled: options.pingEnabled, status: buildStatus() });
-    });
+    }));
 
-    router.post("/aplay-volume", async (req, res) => {
+    router.post(`${prefix}/aplay-volume`, write(async (req, res) => {
       const requested =
         req.body?.volumeLevelPercent ??
         req.body?.volumePercent ??
@@ -429,26 +446,26 @@ module.exports = function aisPlusAudio(app) {
         aplayVolumePercent: options.aplayVolumePercent,
         status: buildStatus(),
       });
-    });
+    }));
 
-    router.post("/clear-queue", (_req, res) => {
+    router.post(`${prefix}/clear-queue`, write((_req, res) => {
       queue = [];
       addRecent("queue-cleared", "Announcement queue cleared");
       res.json({ ok: true });
-    });
+    }));
 
-    router.post("/restart-streams", (_req, res) => {
+    router.post(`${prefix}/restart-streams`, write((_req, res) => {
       const count = restartLiveStreamClients("manual stream restart");
       res.json({ ok: true, restarted: count });
-    });
+    }));
 
-    router.post("/stream-time-check", (_req, res) => {
+    router.post(`${prefix}/stream-time-check`, write((_req, res) => {
       const entry = createStreamTimeCheckAnnouncement(true);
       enqueue(entry);
       res.json({ ok: true, announcement: entry });
-    });
+    }));
 
-    router.post("/repeat-last", (_req, res) => {
+    router.post(`${prefix}/repeat-last`, write((_req, res) => {
       if (!lastAnnouncement) {
         res.status(404).json({ error: "No announcement has been received yet." });
         return;
@@ -459,10 +476,27 @@ module.exports = function aisPlusAudio(app) {
         force: true,
       });
       res.json({ ok: true });
-    });
-  };
+    }));
+  }
 
-  return plugin;
+  function requireWriteAccess(handler) {
+    return function writeAccessHandler(req, res) {
+      const permission = req.skPrincipal?.permissions;
+      if (
+        permission === "admin" ||
+        permission === "readwrite" ||
+        (permission === undefined && req.skIsAuthenticated !== false)
+      ) {
+        return handler(req, res);
+      }
+      res.status(403).json({
+        ok: false,
+        error:
+          "AIS Plus Audio controls require Signal K read/write or admin access.",
+      });
+      return undefined;
+    };
+  }
 
   function normalizeOptions(value) {
     return {

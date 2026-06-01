@@ -1,3 +1,7 @@
+window.__aisPlusAudioAppStarted = true;
+
+const API = "/signalk/v1/api/aisPlusAudio";
+const REQUEST_TIMEOUT_MS = 8000;
 const statusPill = document.getElementById("statusPill");
 const queueLength = document.getElementById("queueLength");
 const renderedCount = document.getElementById("renderedCount");
@@ -18,30 +22,32 @@ const aplayVolumeRange = document.getElementById("aplayVolumeRange");
 const aplayVolumeValue = document.getElementById("aplayVolumeValue");
 const aplayVolumeStatus = document.getElementById("aplayVolumeStatus");
 
+window.addEventListener("error", (event) => {
+  renderStartupError(event.message || "AIS Plus Audio browser script failed");
+});
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason || {};
+  renderStartupError(reason.message || String(reason) || "AIS Plus Audio request failed");
+});
+
 document.getElementById("buttonSoundCheck").addEventListener("click", () => postJson("sound-check"));
 document.getElementById("buttonRepeatLast").addEventListener("click", () => postJson("repeat-last"));
 document.getElementById("buttonClearQueue").addEventListener("click", () => postJson("clear-queue"));
 document.getElementById("buttonRestartStreams").addEventListener("click", () => postJson("restart-streams"));
 document.getElementById("buttonStreamTimeCheck").addEventListener("click", () => postJson("stream-time-check"));
-checkPingEnabled.addEventListener("change", () =>
+checkPingEnabled.addEventListener("change", () => {
   postJson(`ping-enabled?enabled=${checkPingEnabled.checked ? "true" : "false"}`).catch(
-    (error) => {
-      renderEvents([{ event: "error", message: error.message, ts: new Date().toISOString() }]);
-      refresh();
-    },
-  ),
-);
+    renderCommandError,
+  );
+});
 aplayVolumeRange.addEventListener("input", () => {
   renderAplayVolumeValue(aplayVolumeRange.value);
 });
-aplayVolumeRange.addEventListener("change", () =>
+aplayVolumeRange.addEventListener("change", () => {
   postJson(`aplay-volume?volume=${encodeURIComponent(aplayVolumeRange.value)}`).catch(
-    (error) => {
-      renderEvents([{ event: "error", message: error.message, ts: new Date().toISOString() }]);
-      refresh();
-    },
-  ),
-);
+    renderCommandError,
+  );
+});
 
 refresh();
 setInterval(refresh, 2000);
@@ -58,7 +64,7 @@ async function refresh() {
 }
 
 async function getJson(path) {
-  const response = await fetch(`/plugins/signalk-ais-plus-audio/${path}`, {
+  const response = await fetchWithTimeout(`${API}/${path}`, {
     credentials: "include",
     cache: "no-store",
   });
@@ -67,7 +73,7 @@ async function getJson(path) {
 }
 
 async function postJson(path, body = null) {
-  const response = await fetch(`/plugins/signalk-ais-plus-audio/${path}`, {
+  const response = await fetchWithTimeout(`${API}/${path}`, {
     credentials: "include",
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -83,14 +89,16 @@ async function postJson(path, body = null) {
 function renderStatus(status) {
   statusPill.textContent = status.muted ? "Muted" : status.enabled ? "Ready" : "Disabled";
   statusPill.className = `status-pill ${status.muted || !status.enabled ? "warn" : "good"}`;
-  queueLength.textContent = status.queueLength ?? 0;
-  renderedCount.textContent = status.stats?.rendered ?? 0;
-  filteredCount.textContent = status.stats?.filtered ?? 0;
-  streamCount.textContent = status.liveStreamClients ?? 0;
-  droppedStreamCount.textContent = status.droppedLaggingClients ?? 0;
+  const stats = status.stats || {};
+  const streamStats = status.streamStats || {};
+  queueLength.textContent = status.queueLength != null ? status.queueLength : 0;
+  renderedCount.textContent = stats.rendered != null ? stats.rendered : 0;
+  filteredCount.textContent = stats.filtered != null ? stats.filtered : 0;
+  streamCount.textContent = status.liveStreamClients != null ? status.liveStreamClients : 0;
+  droppedStreamCount.textContent = status.droppedLaggingClients != null ? status.droppedLaggingClients : 0;
   serverTime.textContent = formatTime(status.serverTime);
-  streamConnectedTotal.textContent = status.streamStats?.connectedTotal ?? 0;
-  streamDisconnectedTotal.textContent = status.streamStats?.disconnectedTotal ?? 0;
+  streamConnectedTotal.textContent = streamStats.connectedTotal != null ? streamStats.connectedTotal : 0;
+  streamDisconnectedTotal.textContent = streamStats.disconnectedTotal != null ? streamStats.disconnectedTotal : 0;
   checkPingEnabled.checked = status.pingEnabled !== false;
   renderAplayVolumeControl(status);
   audioDirectory.textContent = status.audioDirectory || "";
@@ -99,13 +107,15 @@ function renderStatus(status) {
     `${window.location.origin}${status.streamUrl || "/plugins/signalk-ais-plus-audio/live.mp3"}`;
   streamDiagnostics.textContent = formatStreamDiagnostics(status);
 
-  if (status.lastAnnouncement?.message) {
+  if (status.lastAnnouncement && status.lastAnnouncement.message) {
     lastAnnouncement.classList.remove("muted");
     lastAnnouncement.textContent = status.lastAnnouncement.message;
-    if (status.lastAnnouncement.audioUrl) {
+    const announcementAudioUrl =
+      status.lastAnnouncement.publicAudioUrl || status.lastAnnouncement.audioUrl;
+    if (announcementAudioUrl) {
       lastAudio.hidden = false;
-      if (lastAudio.getAttribute("src") !== status.lastAnnouncement.audioUrl) {
-        lastAudio.setAttribute("src", status.lastAnnouncement.audioUrl);
+      if (lastAudio.getAttribute("src") !== announcementAudioUrl) {
+        lastAudio.setAttribute("src", announcementAudioUrl);
       }
     } else {
       lastAudio.hidden = true;
@@ -126,7 +136,14 @@ function renderAplayVolumeControl(status) {
   const maximum = Number(status.aplayVolumeMaximumPercent) || 100;
   const value = Math.max(
     minimum,
-    Math.min(maximum, Number(status.aplayVolumeLevelPercent ?? status.aplayVolumePercent) || 0),
+    Math.min(
+      maximum,
+      Number(
+        status.aplayVolumeLevelPercent != null
+          ? status.aplayVolumeLevelPercent
+          : status.aplayVolumePercent,
+      ) || 0,
+    ),
   );
   aplayVolumeRange.min = String(minimum);
   aplayVolumeRange.max = String(maximum);
@@ -140,7 +157,11 @@ function renderAplayVolumeControl(status) {
   } else {
     const control = status.lastAplayVolumeControl || status.aplayVolumeControl || "PCM";
     const mixerPercent = Math.round(
-      Number(status.aplayMixerVolumePercent ?? status.aplayVolumePercent) || 66,
+      Number(
+        status.aplayMixerVolumePercent != null
+          ? status.aplayMixerVolumePercent
+          : status.aplayVolumePercent,
+      ) || 66,
     );
     aplayVolumeStatus.textContent = status.lastAplayVolumeSetAt
       ? `Applied ${formatTime(status.lastAplayVolumeSetAt)}: ${mixerPercent}% mixer on ${control}.`
@@ -201,9 +222,53 @@ function formatTime(value) {
 }
 
 function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderCommandError(error) {
+  renderEvents([{ event: "error", message: error.message, ts: new Date().toISOString() }]);
+  refresh();
+}
+
+function renderStartupError(message) {
+  statusPill.textContent = "Error";
+  statusPill.className = "status-pill bad";
+  renderEvents([
+    {
+      event: "error",
+      message: `AIS Plus Audio cannot update the page: ${message}`,
+      ts: new Date().toISOString(),
+    },
+  ]);
+}
+
+function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  if (typeof AbortController === "function") {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    const fetchOptions = Object.assign({}, options, { signal: controller.signal });
+    return fetch(url, fetchOptions)
+      .then((response) => {
+        window.clearTimeout(timer);
+        return response;
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        if (error && error.name === "AbortError") {
+          throw new Error(`Timed out waiting for ${url}`);
+        }
+        throw error;
+      });
+  }
+
+  return Promise.race([
+    fetch(url, options),
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error(`Timed out waiting for ${url}`)), timeoutMs);
+    }),
+  ]);
 }
