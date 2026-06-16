@@ -1,9 +1,12 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const os = require("node:os");
+const path = require("node:path");
 const createPlugin = require("../plugin");
 
 function createHarness(initialOptions = {}, harnessOptions = {}) {
   const savedOptions = [];
+  const subscriptionCallbacks = [];
   const app = {
     config: { configPath: "/tmp" },
     debug() {},
@@ -15,7 +18,9 @@ function createHarness(initialOptions = {}, harnessOptions = {}) {
       callback();
     },
     subscriptionmanager: {
-      subscribe() {},
+      subscribe(_subscription, _unsubscribes, _onError, onDelta) {
+        subscriptionCallbacks.push(onDelta);
+      },
     },
   };
   const plugin = createPlugin(app);
@@ -41,7 +46,7 @@ function createHarness(initialOptions = {}, harnessOptions = {}) {
     },
   });
 
-  return { plugin, savedOptions, posts, gets };
+  return { plugin, savedOptions, posts, gets, subscriptionCallbacks };
 }
 
 function withPlatform(platform, fn) {
@@ -58,6 +63,72 @@ function statusOf(harness) {
   let status;
   harness.gets.get("/status")({}, { json(body) { status = body; } });
   return status;
+}
+
+function sendNotification(harness, pathName, value) {
+  assert.ok(harness.subscriptionCallbacks.length > 0, "subscription callback registered");
+  harness.subscriptionCallbacks[0]({
+    updates: [
+      {
+        values: [
+          {
+            path: pathName,
+            value,
+          },
+        ],
+      },
+    ],
+  });
+}
+
+function vesselNotification(mmsi, message) {
+  return {
+    state: "warning",
+    method: ["sound"],
+    message,
+    data: {
+      category: "cpa",
+      alertEvent: {
+        mmsi,
+        vesselName: `Vessel ${mmsi}`,
+        methods: ["sound"],
+        message,
+      },
+      announcement: {},
+    },
+  };
+}
+
+function soundStateNotification(muted) {
+  return {
+    state: "normal",
+    method: ["sound"],
+    message: muted ? "Sounds disabled." : "Sounds enabled.",
+    data: {
+      category: "system",
+      muted,
+      announcement: {},
+    },
+  };
+}
+
+function createSlowRenderHarness() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ais-plus-audio-test-"));
+  const voicesDir = path.join(tempDir, "voices");
+  fs.mkdirSync(voicesDir, { recursive: true });
+  fs.writeFileSync(path.join(voicesDir, "en_GB-alan-medium.onnx"), "");
+  const piperBinary = path.join(tempDir, "slow-piper.sh");
+  fs.writeFileSync(piperBinary, "#!/bin/sh\nsleep 1\nexit 1\n");
+  fs.chmodSync(piperBinary, 0o755);
+  const harness = createHarness({
+    audioDirectory: path.join(tempDir, "audio"),
+    liveStream: false,
+    localPlayback: false,
+    piperBinary,
+    publicHttpStream: false,
+    voicesDir,
+  });
+  return { ...harness, tempDir };
 }
 
 async function postVolume(harness, volume) {
@@ -135,6 +206,49 @@ async function postVolume(harness, volume) {
   assert.equal(statusOf(darwinSavedAmixer).aplayVolumeCommand, "");
   assert.equal(statusOf(darwinSavedAmixer).aplayVolumeEnabled, false);
   darwinSavedAmixer.plugin.stop();
+
+  const queuedMute = createSlowRenderHarness();
+  sendNotification(
+    queuedMute,
+    "notifications.collision.235900001",
+    vesselNotification("235900001", "Traffic advisory. First vessel."),
+  );
+  assert.ok(statusOf(queuedMute).active, "first announcement is active");
+  sendNotification(
+    queuedMute,
+    "notifications.collision.235900002",
+    vesselNotification("235900002", "Traffic advisory. Second vessel."),
+  );
+  sendNotification(
+    queuedMute,
+    "notifications.collision.235900003",
+    vesselNotification("235900003", "Traffic advisory. Third vessel."),
+  );
+  assert.equal(statusOf(queuedMute).queueLength, 2);
+  sendNotification(
+    queuedMute,
+    "notifications.collision.soundState",
+    soundStateNotification(true),
+  );
+  assert.equal(statusOf(queuedMute).queueLength, 0);
+  assert.equal(statusOf(queuedMute).aisPlusMuted, true);
+  assert.equal(statusOf(queuedMute).muted, true);
+  sendNotification(
+    queuedMute,
+    "notifications.collision.235900004",
+    vesselNotification("235900004", "Traffic advisory. Fourth vessel."),
+  );
+  assert.equal(statusOf(queuedMute).queueLength, 0);
+  sendNotification(
+    queuedMute,
+    "notifications.collision.soundState",
+    soundStateNotification(false),
+  );
+  assert.equal(statusOf(queuedMute).aisPlusMuted, false);
+  assert.equal(statusOf(queuedMute).muted, false);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  queuedMute.plugin.stop();
+  fs.rmSync(queuedMute.tempDir, { recursive: true, force: true });
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -116,6 +116,8 @@ For normal use, keep the phone on the boat Wi-Fi and use the local `.local` addr
 
 AIS Plus Audio keeps the current speaker announcement uninterrupted. When a new vessel announcement is queued, any older queued announcements for the same vessel are dropped before the new one is added. This keeps busy-area speech focused on the latest known state, including de-escalations from collision alarm back to advisory.
 
+When AIS Plus is muted, AIS Plus Audio immediately clears its queued backlog and suppresses further non-forced announcements until AIS Plus sounds are enabled again. It does not interrupt an announcement already playing on the local speaker.
+
 ## Notes
 
 - Requires Piper and FFmpeg on the Signal K server.

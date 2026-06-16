@@ -28,6 +28,7 @@ module.exports = function aisPlusAudio(app) {
   let queue = [];
   let active = null;
   let lastAnnouncement = null;
+  let aisPlusMuted = false;
   let lastAplayVolumeSetAt = null;
   let lastAplayVolumeError = "";
   let lastAplayVolumeControl = "";
@@ -97,6 +98,7 @@ module.exports = function aisPlusAudio(app) {
     unsubscribes = [];
     queue = [];
     active = null;
+    aisPlusMuted = false;
     stopLiveStreamSilence();
     for (const client of Array.from(liveStreamClients)) {
       closeLiveStreamClient(client, "plugin stop");
@@ -613,6 +615,19 @@ module.exports = function aisPlusAudio(app) {
     const announcement = value?.data?.announcement || {};
     const methods = normalizeMethods(alertEvent.methods || value?.method);
     const message = String(alertEvent.message || value?.message || "").trim();
+    const muted = soundStateMutedValue(value);
+
+    if (muted === true) {
+      aisPlusMuted = true;
+      clearQueuedAnnouncements("AIS Plus muted");
+      publishStatus();
+      debug(`AIS Plus mute received from ${pathName}`);
+      return;
+    }
+    if (muted === false) {
+      aisPlusMuted = false;
+      publishStatus();
+    }
 
     if (!message || !methods.includes("sound") || alertEvent.shouldAnnounce === false || announcement.shouldAnnounce === false) {
       stats.filtered += 1;
@@ -655,7 +670,7 @@ module.exports = function aisPlusAudio(app) {
       addRecent("skipped", `Audio disabled: ${entry.message}`);
       return;
     }
-    if (options.muted && !entry.force) {
+    if (isAudioMutedForEntry(entry)) {
       addRecent("skipped", `Muted: ${entry.message}`);
       return;
     }
@@ -748,11 +763,11 @@ module.exports = function aisPlusAudio(app) {
       };
       await fs.promises.writeFile(metadataFile, `${JSON.stringify(rendered, null, 2)}\n`);
       await cleanupGeneratedAudio();
-      if (entry.streamOutput !== false) {
+      if (entry.streamOutput !== false && !isAudioMutedForEntry(entry)) {
         await broadcastMp3ToLiveStream(mp3File);
       }
 
-      if (!entry.streamOnly && entry.localPlayback !== false && options.localPlayback && !options.muted) {
+      if (!entry.streamOnly && entry.localPlayback !== false && options.localPlayback && !isAudioMutedForEntry(entry)) {
         await playLocalWav(combinedWav);
       }
 
@@ -807,6 +822,30 @@ module.exports = function aisPlusAudio(app) {
     );
   }
 
+  function clearQueuedAnnouncements(reason) {
+    const removed = queue.length;
+    queue = [];
+    addRecent(
+      "queue-cleared",
+      `${reason}: ${removed > 0 ? `dropped ${removed} queued announcement${removed === 1 ? "" : "s"}` : "queue already empty"}`,
+    );
+  }
+
+  function soundStateMutedValue(value) {
+    if (value?.data?.category !== "system") return null;
+    if (value?.data?.muted === true) return true;
+    if (value?.data?.muted === false) return false;
+    return null;
+  }
+
+  function isAudioMuted() {
+    return options.muted === true || aisPlusMuted === true;
+  }
+
+  function isAudioMutedForEntry(entry) {
+    return entry?.force !== true && isAudioMuted();
+  }
+
   function normalizeMethods(method) {
     const values = Array.isArray(method) ? method : [method];
     return values
@@ -830,7 +869,9 @@ module.exports = function aisPlusAudio(app) {
       version: packageInfo.version,
       serverTime: new Date().toISOString(),
       enabled: options.enabled,
-      muted: options.muted,
+      muted: isAudioMuted(),
+      pluginMuted: options.muted,
+      aisPlusMuted,
       localPlayback: options.localPlayback,
       liveStream: options.liveStream,
       liveStreamClients: liveStreamClients.size,
