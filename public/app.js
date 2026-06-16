@@ -184,6 +184,9 @@ function renderAplayVolumeControl(status) {
   if (status.lastAplayVolumeError) {
     aplayVolumeStatus.textContent = `Last apply failed: ${status.lastAplayVolumeError}`;
     aplayVolumeStatus.classList.add("warning");
+  } else if (!status.aplayVolumeEnabled) {
+    aplayVolumeStatus.textContent = "Hardware mixer control is disabled.";
+    aplayVolumeStatus.classList.remove("warning");
   } else {
     const control = status.lastAplayVolumeControl || status.aplayVolumeControl || "PCM";
     const mixerPercent = Math.round(

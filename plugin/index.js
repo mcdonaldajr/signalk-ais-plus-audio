@@ -17,6 +17,7 @@ const DEFAULT_APLAY_MIXER_VOLUME_PERCENT = 75;
 const DEFAULT_APLAY_VOLUME_LEVEL_PERCENT = 53;
 const APLAY_VOLUME_LOG_BASE = 10;
 const DEFAULT_APLAY_VOLUME_CONTROL = "PCM";
+const DEFAULT_APLAY_VOLUME_COMMAND = "amixer";
 const APLAY_VOLUME_FALLBACK_CONTROLS = ["PCM", "Master", "Headphone", "Speaker"];
 
 module.exports = function aisPlusAudio(app) {
@@ -184,8 +185,8 @@ module.exports = function aisPlusAudio(app) {
         type: "string",
         title: "Local speaker mixer command",
         description:
-          "Usually amixer on Raspberry Pi OS. Leave blank to disable hardware mixer volume control.",
-        default: "amixer",
+          "Usually amixer on Raspberry Pi OS. Leave blank to disable hardware mixer volume control. macOS disables this automatically.",
+        default: defaultAplayVolumeCommand(),
       },
       aplayVolumeControl: {
         type: "string",
@@ -518,7 +519,7 @@ module.exports = function aisPlusAudio(app) {
         normalizeAplayVolumeLevelPercent(value.aplayVolumeLevelPercent, value.aplayVolumePercent),
       ),
       aplayVolumeCommand: expandHome(
-        String(value.aplayVolumeCommand == null ? "amixer" : value.aplayVolumeCommand),
+        normalizeAplayVolumeCommand(value.aplayVolumeCommand),
       ),
       aplayVolumeControl:
         String(
@@ -624,7 +625,14 @@ module.exports = function aisPlusAudio(app) {
         id: alertEvent.id || announcement.id || `${pathName}-${Date.now()}`,
         ts: alertEvent.ts || announcement.ts || new Date().toISOString(),
         expiresAt: alertEvent.expiresAt || announcement.expiresAt || null,
-        vesselId: alertEvent.vesselId || value?.source?.label || "",
+        vesselId:
+          alertEvent.vesselId ||
+          alertEvent.mmsi ||
+          announcement.vesselId ||
+          announcement.mmsi ||
+          value?.source?.label ||
+          "",
+        mmsi: alertEvent.mmsi || announcement.mmsi || "",
         vesselName: alertEvent.vesselName || value?.data?.vesselName || "",
         severity: alertEvent.state || value?.state || value?.data?.alarmState || "alert",
         category: alertEvent.category || value?.data?.category || "cpa",
@@ -650,6 +658,21 @@ module.exports = function aisPlusAudio(app) {
     if (options.muted && !entry.force) {
       addRecent("skipped", `Muted: ${entry.message}`);
       return;
+    }
+
+    const supersedeKey = announcementSupersedeKey(entry);
+    if (supersedeKey) {
+      const previousLength = queue.length;
+      queue = queue.filter(
+        (queuedEntry) => announcementSupersedeKey(queuedEntry) !== supersedeKey,
+      );
+      const removed = previousLength - queue.length;
+      if (removed > 0) {
+        addRecent(
+          "superseded",
+          `Dropped ${removed} stale queued announcement${removed === 1 ? "" : "s"} for ${announcementDisplayName(entry)}`,
+        );
+      }
     }
 
     queue.push(entry);
@@ -751,6 +774,7 @@ module.exports = function aisPlusAudio(app) {
       timestamp: ts,
       expiresAt,
       vesselId: String(value.vesselId || ""),
+      mmsi: String(value.mmsi || ""),
       vesselName: String(value.vesselName || ""),
       severity: String(value.severity || "alert"),
       category: String(value.category || "cpa"),
@@ -763,6 +787,24 @@ module.exports = function aisPlusAudio(app) {
       localPlayback: value.localPlayback !== false,
       streamOutput: value.streamOutput !== false,
     };
+  }
+
+  function announcementSupersedeKey(entry) {
+    if (!entry || entry.force || entry.category === "stream-health") return "";
+    const vesselId = String(entry.vesselId || entry.mmsi || "").trim();
+    if (vesselId) return `vessel:${vesselId}`;
+    const sourcePath = String(entry.sourcePath || "").trim();
+    const collisionMatch = sourcePath.match(/^notifications\.collision\.([^.\s]+)$/);
+    if (collisionMatch?.[1]) return `collision:${collisionMatch[1]}`;
+    return "";
+  }
+
+  function announcementDisplayName(entry) {
+    return (
+      String(entry?.vesselName || "").trim() ||
+      String(entry?.vesselId || entry?.mmsi || "").trim() ||
+      "target"
+    );
   }
 
   function normalizeMethods(method) {
@@ -822,6 +864,7 @@ module.exports = function aisPlusAudio(app) {
       aplayMixerMinimumPercent: MIN_APLAY_MIXER_VOLUME_PERCENT,
       aplayMixerMaximumPercent: MAX_APLAY_MIXER_VOLUME_PERCENT,
       aplayVolumeCommand: options.aplayVolumeCommand,
+      aplayVolumeEnabled: Boolean(options.localPlayback && options.aplayVolumeCommand),
       aplayVolumeControl: options.aplayVolumeControl,
       lastAplayVolumeSetAt,
       lastAplayVolumeError,
@@ -1717,6 +1760,18 @@ module.exports = function aisPlusAudio(app) {
     const preferred = String(value || DEFAULT_APLAY_VOLUME_CONTROL).trim();
     const candidates = [preferred, ...APLAY_VOLUME_FALLBACK_CONTROLS];
     return candidates.filter((control, index) => control && candidates.indexOf(control) === index);
+  }
+
+  function normalizeAplayVolumeCommand(value) {
+    const command = String(value == null ? defaultAplayVolumeCommand() : value).trim();
+    if (os.platform() === "darwin" && command === DEFAULT_APLAY_VOLUME_COMMAND) {
+      return "";
+    }
+    return command;
+  }
+
+  function defaultAplayVolumeCommand() {
+    return os.platform() === "darwin" ? "" : DEFAULT_APLAY_VOLUME_COMMAND;
   }
 
   function clampPcm16(value) {

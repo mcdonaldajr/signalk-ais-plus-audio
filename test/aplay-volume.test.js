@@ -1,7 +1,8 @@
 const assert = require("node:assert/strict");
+const os = require("node:os");
 const createPlugin = require("../plugin");
 
-function createHarness(initialOptions = {}) {
+function createHarness(initialOptions = {}, harnessOptions = {}) {
   const savedOptions = [];
   const app = {
     config: { configPath: "/tmp" },
@@ -18,13 +19,16 @@ function createHarness(initialOptions = {}) {
     },
   };
   const plugin = createPlugin(app);
-  plugin.start({
+  const baseOptions = {
     publicHttpStream: false,
     liveStream: false,
     localPlayback: true,
-    aplayVolumeCommand: "",
     ...initialOptions,
-  });
+  };
+  if (harnessOptions.disableMixer !== false && initialOptions.aplayVolumeCommand == null) {
+    baseOptions.aplayVolumeCommand = "";
+  }
+  plugin.start(baseOptions);
 
   const posts = new Map();
   const gets = new Map();
@@ -38,6 +42,16 @@ function createHarness(initialOptions = {}) {
   });
 
   return { plugin, savedOptions, posts, gets };
+}
+
+function withPlatform(platform, fn) {
+  const original = os.platform;
+  os.platform = () => platform;
+  try {
+    return fn();
+  } finally {
+    os.platform = original;
+  }
 }
 
 function statusOf(harness) {
@@ -103,6 +117,24 @@ async function postVolume(harness, volume) {
   assert.equal(routeMaximum.savedOptions.at(-1).aplayVolumeLevelPercent, 100);
   assert.equal(routeMaximum.savedOptions.at(-1).aplayVolumePercent, 100);
   routeMaximum.plugin.stop();
+
+  const darwinDefault = withPlatform("darwin", () =>
+    createHarness({}, { disableMixer: false }),
+  );
+  assert.equal(statusOf(darwinDefault).aplayVolumeCommand, "");
+  assert.equal(statusOf(darwinDefault).aplayVolumeEnabled, false);
+  const darwinDefaultBody = await postVolume(darwinDefault, 40);
+  assert.equal(darwinDefaultBody.statusCode, 200);
+  assert.equal(darwinDefaultBody.applied, false);
+  assert.equal(darwinDefaultBody.error, "");
+  darwinDefault.plugin.stop();
+
+  const darwinSavedAmixer = withPlatform("darwin", () =>
+    createHarness({ aplayVolumeCommand: "amixer" }, { disableMixer: false }),
+  );
+  assert.equal(statusOf(darwinSavedAmixer).aplayVolumeCommand, "");
+  assert.equal(statusOf(darwinSavedAmixer).aplayVolumeEnabled, false);
+  darwinSavedAmixer.plugin.stop();
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -112,6 +112,10 @@ For normal use, keep the phone on the boat Wi-Fi and use the local `.local` addr
 - AIS Plus Companion can play the rendered audio while open.
 - A native radio player can play the live stream while the phone or tablet is locked.
 
+## Queue Behaviour
+
+AIS Plus Audio keeps the current speaker announcement uninterrupted. When a new vessel announcement is queued, any older queued announcements for the same vessel are dropped before the new one is added. This keeps busy-area speech focused on the latest known state, including de-escalations from collision alarm back to advisory.
+
 ## Notes
 
 - Requires Piper and FFmpeg on the Signal K server.
