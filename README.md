@@ -2,12 +2,13 @@
 
 > **Alpha Release disclaimer:** This software is Alpha Release and has not been tested in live environments and must not be relied upon for navigation or safety. The Authors do not accept any responsibility for loss or damage as a result of using this software.
 
-AIS Plus Audio is the standalone audio renderer for AIS Plus and Audible Instruments announcements.
+AIS Plus Audio is the standalone renderer for Notifications Plus audio-delivery events.
 
 It replaces the older `announce-ais-messages` and standalone Lubuntu speaker paths by rendering each announcement once on the Signal K server:
 
 ```text
-AIS Plus or Audible Instruments announcement event
+Standards-compatible Signal K notification
+  -> Notifications Plus audio projection
   -> Piper speech
   -> stereo directional ping
   -> stereo browser-friendly audio file
@@ -16,7 +17,7 @@ AIS Plus or Audible Instruments announcement event
 
 ## Current State
 
-Version `1.3.0` renders both AIS Plus encounter announcements and Audible Instruments monitoring announcements. It creates Piper WAV speech, can prepend the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, publishes read-only status at `vessels.self.plugins.aisPlusAudio`, can play the combined WAV locally on the Signal K server, and exposes generated files plus a continuous radio-style MP3 stream on the public stream port for read-only clients. The webapp uses normal Signal K API routes at `/signalk/v1/api/aisPlusAudio/...`; controls require Signal K read/write or admin access.
+Version `1.4.0` consumes the Notifications Plus audio projection. This gives all providers common priority ordering, subject supersession, freshness, and output instructions without Audio interpreting message content. It creates Piper WAV speech, can prepend the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, publishes read-only status at `vessels.self.plugins.aisPlusAudio`, can play the combined WAV locally on the Signal K server, and exposes generated files plus a continuous radio-style MP3 stream on the public stream port for read-only clients.
 
 Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. The local speaker level setting uses a logarithmic curve and applies the matching ALSA mixer volume at AIS Plus Audio startup and before local `aplay` playback. Level `0%` maps to `66%` on the mixer, level `100%` maps to `100%`, and old linear mixer-volume settings are migrated onto the new curve. It tries the configured mixer control first, then common Pi/ALSA controls such as `PCM`, `Master`, `Headphone`, and `Speaker`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
 
@@ -26,7 +27,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v1.3.0 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v1.4.0 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
@@ -107,9 +108,9 @@ For normal use, keep the phone on the boat Wi-Fi and use the local `.local` addr
 
 ## Responsibilities
 
-- AIS Plus decides whether an AIS encounter announcement is required.
-- Audible Instruments decides whether a configured instrument announcement is required.
-- AIS Plus Audio renders and serves the audio.
+- Providers decide notification meaning and publish standard Signal K notifications.
+- Notifications Plus applies priority, lifecycle, supersession, history, and delivery mechanics.
+- AIS Plus Audio renders the broker's audio projection without classifying content.
 - AIS Plus Companion can play the rendered audio while open.
 - A native radio player can play the live stream while the phone or tablet is locked.
 

@@ -19,10 +19,7 @@ const APLAY_VOLUME_LOG_BASE = 10;
 const DEFAULT_APLAY_VOLUME_CONTROL = "PCM";
 const DEFAULT_APLAY_VOLUME_COMMAND = "amixer";
 const APLAY_VOLUME_FALLBACK_CONTROLS = ["PCM", "Master", "Headphone", "Speaker"];
-const ANNOUNCEMENT_NOTIFICATION_ROOTS = [
-  "notifications.collision",
-  "notifications.audibleInstruments",
-];
+const NOTIFICATIONS_PLUS_PATH = "plugins.notificationsPlus";
 
 module.exports = function aisPlusAudio(app) {
   const plugin = {};
@@ -33,6 +30,7 @@ module.exports = function aisPlusAudio(app) {
   let active = null;
   let lastAnnouncement = null;
   let aisPlusMuted = false;
+  let lastNotificationsPlusAudioSequence = 0;
   let lastAplayVolumeSetAt = null;
   let lastAplayVolumeError = "";
   let lastAplayVolumeControl = "";
@@ -567,10 +565,9 @@ module.exports = function aisPlusAudio(app) {
 
     const subscription = {
       context: "vessels.self",
-      subscribe: ANNOUNCEMENT_NOTIFICATION_ROOTS.flatMap((notificationRoot) => [
-        { path: notificationRoot, policy: "instant", format: "delta" },
-        { path: `${notificationRoot}.*`, policy: "instant", format: "delta" },
-      ]),
+      subscribe: [
+        { path: NOTIFICATIONS_PLUS_PATH, policy: "instant", format: "delta" },
+      ],
     };
 
     app.subscriptionmanager.subscribe(
@@ -593,70 +590,49 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function handleNotificationValue(value) {
-    const notificationRoot = ANNOUNCEMENT_NOTIFICATION_ROOTS.find(
-      (root) => value?.path === root || value?.path?.startsWith(`${root}.`),
-    );
-    if (!notificationRoot) return;
+    if (value?.path !== NOTIFICATIONS_PLUS_PATH) return;
+    const projection = value.value;
+    const sequence = Number(projection?.audioSequence) || 0;
+    const envelope = projection?.lastAudioEvent;
+    if (!envelope || sequence <= lastNotificationsPlusAudioSequence) return;
+    lastNotificationsPlusAudioSequence = sequence;
     stats.received += 1;
-
-    if (value.path === notificationRoot && value.value && typeof value.value === "object") {
-      for (const [id, notification] of Object.entries(value.value)) {
-        handleNotification(`${notificationRoot}.${id}`, notification);
-      }
-      return;
-    }
-
-    handleNotification(value.path, value.value);
+    handleNotificationsPlusAudio(envelope);
   }
 
-  function handleNotification(pathName, value) {
-    const alertEvent = value?.data?.alertEvent || {};
-    const announcement = value?.data?.announcement || {};
-    const methods = normalizeMethods(alertEvent.methods || value?.method);
-    const message = String(alertEvent.message || value?.message || "").trim();
-    const muted = soundStateMutedValue(value);
-
-    if (muted === true) {
+  function handleNotificationsPlusAudio(envelope) {
+    const muteState = envelope?.delivery?.muteState;
+    if (muteState === true) {
       aisPlusMuted = true;
-      clearQueuedAnnouncements("AIS Plus muted");
+      clearQueuedAnnouncements("Provider muted audio");
       publishStatus();
-      debug(`AIS Plus mute received from ${pathName}`);
       return;
     }
-    if (muted === false) {
+    if (muteState === false) {
       aisPlusMuted = false;
       publishStatus();
     }
 
-    if (!message || !methods.includes("sound") || alertEvent.shouldAnnounce === false || announcement.shouldAnnounce === false) {
+    const message = String(envelope?.presentation?.message || "").trim();
+    if (!message || envelope?.delivery?.audio !== true) {
       stats.filtered += 1;
-      debug(`Filtered ${pathName}`);
       return;
     }
-
     enqueue(
       normalizeAnnouncement({
-        id: alertEvent.id || announcement.id || `${pathName}-${Date.now()}`,
-        ts: alertEvent.ts || announcement.ts || new Date().toISOString(),
-        expiresAt: alertEvent.expiresAt || announcement.expiresAt || null,
-        vesselId:
-          alertEvent.vesselId ||
-          alertEvent.mmsi ||
-          announcement.vesselId ||
-          announcement.mmsi ||
-          value?.source?.label ||
-          "",
-        mmsi: alertEvent.mmsi || announcement.mmsi || "",
-        vesselName: alertEvent.vesselName || value?.data?.vesselName || "",
-        severity: alertEvent.state || value?.state || value?.data?.alarmState || "alert",
-        category: alertEvent.category || value?.data?.category || "cpa",
-        clock: alertEvent.clock || announcement.clock || value?.data?.relativeClock,
-        sizeCategory:
-          alertEvent.sizeCategory || announcement.sizeCategory || value?.data?.sizeCategory,
+        id: envelope.eventId,
+        ts: envelope.timestamp,
+        expiresAt: envelope.audioExpiresAt || envelope.expiresAt || null,
+        vesselId: envelope.subjectKey || "",
+        mmsi: envelope.context?.mmsi || "",
+        vesselName: envelope.presentation?.title || "",
+        severity: envelope.priority?.level || "information",
+        priorityScore: Number(envelope.priority?.score) || 0,
+        category: envelope.presentation?.category || "notification",
         message,
-        sourcePath: pathName,
-        localPlayback: announcement.localPlayback !== false && alertEvent.localPlayback !== false,
-        streamOutput: announcement.streamOutput !== false && alertEvent.streamOutput !== false,
+        sourcePath: NOTIFICATIONS_PLUS_PATH,
+        localPlayback: envelope.delivery?.localPlayback !== false,
+        streamOutput: envelope.delivery?.streamOutput !== false,
       }),
     );
   }
@@ -690,8 +666,13 @@ module.exports = function aisPlusAudio(app) {
     }
 
     queue.push(entry);
+    queue.sort(
+      (left, right) =>
+        Number(right.priorityScore || 0) - Number(left.priorityScore || 0) ||
+        Date.parse(left.timestamp || 0) - Date.parse(right.timestamp || 0),
+    );
     if (queue.length > options.maxQueueLength) {
-      queue = queue.slice(queue.length - options.maxQueueLength);
+      queue = queue.slice(0, options.maxQueueLength);
       addRecent("warning", "Dropped stale queued announcements");
     }
     stats.queued += 1;
@@ -791,6 +772,7 @@ module.exports = function aisPlusAudio(app) {
       mmsi: String(value.mmsi || ""),
       vesselName: String(value.vesselName || ""),
       severity: String(value.severity || "alert"),
+      priorityScore: Number(value.priorityScore) || 0,
       category: String(value.category || "cpa"),
       clock: normalizeClock(value.clock),
       sizeCategory: normalizeSizeCategory(value.sizeCategory),
@@ -830,27 +812,12 @@ module.exports = function aisPlusAudio(app) {
     );
   }
 
-  function soundStateMutedValue(value) {
-    if (value?.data?.category !== "system") return null;
-    if (value?.data?.muted === true) return true;
-    if (value?.data?.muted === false) return false;
-    return null;
-  }
-
   function isAudioMuted() {
     return options.muted === true || aisPlusMuted === true;
   }
 
   function isAudioMutedForEntry(entry) {
     return entry?.force !== true && isAudioMuted();
-  }
-
-  function normalizeMethods(method) {
-    const values = Array.isArray(method) ? method : [method];
-    return values
-      .flatMap((item) => String(item || "").split(","))
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean);
   }
 
   function buildStatus() {

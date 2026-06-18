@@ -46,7 +46,14 @@ function createHarness(initialOptions = {}, harnessOptions = {}) {
     },
   });
 
-  return { plugin, savedOptions, posts, gets, subscriptionCallbacks };
+  return {
+    plugin,
+    savedOptions,
+    posts,
+    gets,
+    subscriptionCallbacks,
+    brokerSequence: 0,
+  };
 }
 
 function withPlatform(platform, fn) {
@@ -67,13 +74,42 @@ function statusOf(harness) {
 
 function sendNotification(harness, pathName, value) {
   assert.ok(harness.subscriptionCallbacks.length > 0, "subscription callback registered");
+  harness.brokerSequence += 1;
+  const alertEvent = value?.data?.alertEvent || {};
+  const muteState =
+    typeof value?.data?.muted === "boolean" ? value.data.muted : null;
   harness.subscriptionCallbacks[0]({
     updates: [
       {
         values: [
           {
-            path: pathName,
-            value,
+            path: "plugins.notificationsPlus",
+            value: {
+              audioSequence: harness.brokerSequence,
+              lastAudioEvent: {
+                schemaVersion: 1,
+                provider: "ais-plus",
+                subjectKey: pathName,
+                eventId: alertEvent.id || `${pathName}-${harness.brokerSequence}`,
+                lifecycle: "event",
+                timestamp: new Date().toISOString(),
+                priority: { level: "warning", score: 500 },
+                delivery: {
+                  audio: true,
+                  localPlayback: true,
+                  streamOutput: true,
+                  muteState,
+                },
+                presentation: {
+                  title: alertEvent.vesselName || "AIS Plus",
+                  message: alertEvent.message || value?.message || "",
+                  category: value?.data?.category || "notification",
+                },
+                context: {
+                  mmsi: alertEvent.mmsi || "",
+                },
+              },
+            },
           },
         ],
       },
