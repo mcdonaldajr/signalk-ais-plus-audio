@@ -72,7 +72,14 @@ function statusOf(harness) {
   return status;
 }
 
-function sendNotification(harness, pathName, value, priorityScore = 500) {
+function sendNotification(
+  harness,
+  pathName,
+  value,
+  priorityScore = 500,
+  lifecycle = "event",
+  activeSubjects = [],
+) {
   assert.ok(harness.subscriptionCallbacks.length > 0, "subscription callback registered");
   harness.brokerSequence += 1;
   const alertEvent = value?.data?.alertEvent || {};
@@ -86,12 +93,13 @@ function sendNotification(harness, pathName, value, priorityScore = 500) {
             path: "plugins.notificationsPlus",
             value: {
               audioSequence: harness.brokerSequence,
+              active: activeSubjects.map((subjectKey) => ({ subjectKey })),
               lastAudioEvent: {
                 schemaVersion: 1,
                 provider: "ais-plus",
                 subjectKey: pathName,
                 eventId: alertEvent.id || `${pathName}-${harness.brokerSequence}`,
-                lifecycle: "event",
+                lifecycle,
                 timestamp: new Date().toISOString(),
                 priority: { level: "warning", score: priorityScore },
                 delivery: {
@@ -292,6 +300,8 @@ async function postVolume(harness, volume) {
     "notifications.system.first",
     vesselNotification("pipeline-first", "First pipeline announcement."),
     100,
+    "active",
+    ["notifications.system.first"],
   );
   await waitFor(() => statusOf(pipeline).active);
   sendNotification(
@@ -299,6 +309,8 @@ async function postVolume(harness, volume) {
     "notifications.system.second",
     vesselNotification("pipeline-second", "Second pipeline announcement."),
     900,
+    "event",
+    ["notifications.system.first"],
   );
   await waitFor(() => {
     const status = statusOf(pipeline);
@@ -317,16 +329,27 @@ async function postVolume(harness, volume) {
           event.event === "speaker-started" &&
           event.message.includes("Second pipeline announcement."),
       );
-      return preempted && secondStarted ? status : null;
+      const firstRestarted =
+        status.recentEvents.filter(
+          (event) =>
+            event.event === "speaker-started" &&
+            event.message.includes("First pipeline announcement."),
+        ).length >= 2;
+      const requeued = status.recentEvents.some(
+        (event) => event.event === "preempted-requeued",
+      );
+      return preempted && secondStarted && firstRestarted && requeued ? status : null;
     },
-    2500,
+    3500,
   );
   assert.equal(
     completedPipelineStatus.stats.failed,
     0,
     "priority interruption is not counted as a rendering failure",
   );
+  await waitFor(() => statusOf(pipeline).stats.rendered >= 2, 3500);
   pipeline.plugin.stop();
+  await new Promise((resolve) => setTimeout(resolve, 50));
   fs.rmSync(pipeline.tempDir, { recursive: true, force: true });
 
   const queuedMute = createSlowRenderHarness();

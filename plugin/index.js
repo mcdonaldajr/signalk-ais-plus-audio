@@ -35,6 +35,7 @@ module.exports = function aisPlusAudio(app) {
   let lastAnnouncement = null;
   let aisPlusMuted = false;
   let lastNotificationsPlusAudioSequence = 0;
+  let activeNotificationSubjects = new Set();
   let lastAplayVolumeSetAt = null;
   let lastAplayVolumeError = "";
   let lastAplayVolumeControl = "";
@@ -109,6 +110,7 @@ module.exports = function aisPlusAudio(app) {
     currentLocalPlaybackChild?.kill("SIGTERM");
     currentLocalPlaybackChild = null;
     currentLocalPlaybackEntry = null;
+    activeNotificationSubjects = new Set();
     aisPlusMuted = false;
     stopLiveStreamSilence();
     for (const client of Array.from(liveStreamClients)) {
@@ -601,6 +603,13 @@ module.exports = function aisPlusAudio(app) {
   function handleNotificationValue(value) {
     if (value?.path !== NOTIFICATIONS_PLUS_PATH) return;
     const projection = value.value;
+    activeNotificationSubjects = new Set(
+      Array.isArray(projection?.active)
+        ? projection.active
+            .map((notification) => String(notification?.subjectKey || "").trim())
+            .filter(Boolean)
+        : [],
+    );
     const sequence = Number(projection?.audioSequence) || 0;
     const envelope = projection?.lastAudioEvent;
     if (!envelope || sequence <= lastNotificationsPlusAudioSequence) return;
@@ -633,6 +642,7 @@ module.exports = function aisPlusAudio(app) {
         id: envelope.eventId,
         ts: envelope.timestamp,
         receivedAt,
+        lifecycle: envelope.lifecycle,
         expiresAt: envelope.audioExpiresAt || envelope.expiresAt || null,
         vesselId: envelope.subjectKey || "",
         mmsi: envelope.context?.mmsi || "",
@@ -890,6 +900,7 @@ module.exports = function aisPlusAudio(app) {
           "preempted",
           `${entry.message} interrupted by higher-priority ${entry.preemptedBy.message}`,
         );
+        requeueInterruptedAnnouncement(entry);
       } else {
         stats.failed += 1;
         addRecent("error", `Render failed: ${error.message}`);
@@ -954,6 +965,48 @@ module.exports = function aisPlusAudio(app) {
     return requeued;
   }
 
+  function requeueInterruptedAnnouncement(entry) {
+    const subjectKey = String(entry.vesselId || "").trim();
+    const remainsActive =
+      entry.lifecycle === "active" &&
+      subjectKey &&
+      activeNotificationSubjects.has(subjectKey);
+    if (
+      !remainsActive ||
+      entry.superseded ||
+      announcementExpired(entry) ||
+      isAudioMutedForEntry(entry) ||
+      (!options.enabled && !entry.force)
+    ) {
+      addRecent(
+        "preempted-not-requeued",
+        `${entry.message} was not repeated because it is no longer active, fresh, or audible`,
+      );
+      return false;
+    }
+    const replay = requeuePreparedEntry({
+      ...entry,
+      id: `${entry.id}-resume-${Date.now()}`,
+      preemptedBy: null,
+      blockedBy: null,
+      localPlaybackStartedAt: null,
+      localPlaybackCompletedAt: null,
+      localPlaybackMs: null,
+      generatedToSpeakerMs: null,
+      queueToSpeakerMs: null,
+      processingToSpeakerMs: null,
+      preparedToSpeakerMs: null,
+      resumeAfterPreemption: true,
+    });
+    queue.push(replay);
+    sortAnnouncementQueue();
+    addRecent(
+      "preempted-requeued",
+      `${entry.message} will restart after the higher-priority announcement`,
+    );
+    return true;
+  }
+
   function sortAnnouncementQueue() {
     queue.sort(
       (left, right) =>
@@ -971,6 +1024,7 @@ module.exports = function aisPlusAudio(app) {
       id: String(value.id || `announcement-${Date.now()}`),
       timestamp: ts,
       expiresAt,
+      lifecycle: String(value.lifecycle || "event"),
       vesselId: String(value.vesselId || ""),
       mmsi: String(value.mmsi || ""),
       vesselName: String(value.vesselName || ""),
