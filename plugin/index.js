@@ -30,6 +30,8 @@ module.exports = function aisPlusAudio(app) {
   let active = null;
   let preparing = null;
   let prepared = null;
+  let currentLocalPlaybackChild = null;
+  let currentLocalPlaybackEntry = null;
   let lastAnnouncement = null;
   let aisPlusMuted = false;
   let lastNotificationsPlusAudioSequence = 0;
@@ -104,6 +106,9 @@ module.exports = function aisPlusAudio(app) {
     active = null;
     preparing = null;
     prepared = null;
+    currentLocalPlaybackChild?.kill("SIGTERM");
+    currentLocalPlaybackChild = null;
+    currentLocalPlaybackEntry = null;
     aisPlusMuted = false;
     stopLiveStreamSilence();
     for (const client of Array.from(liveStreamClients)) {
@@ -757,6 +762,7 @@ module.exports = function aisPlusAudio(app) {
         cleanupPreparedAnnouncement(next);
       } else {
         prepared = next;
+        preemptActiveForPreparedAnnouncement();
       }
     } catch (error) {
       preparing = null;
@@ -879,9 +885,16 @@ module.exports = function aisPlusAudio(app) {
       addRecent("rendered", rendered.message);
       return rendered;
     } catch (error) {
-      stats.failed += 1;
-      addRecent("error", `Render failed: ${error.message}`);
-      app.error(`[${PLUGIN_ID}] render failed: ${error.stack || error.message}`);
+      if (entry.preemptedBy) {
+        addRecent(
+          "preempted",
+          `${entry.message} interrupted by higher-priority ${entry.preemptedBy.message}`,
+        );
+      } else {
+        stats.failed += 1;
+        addRecent("error", `Render failed: ${error.message}`);
+        app.error(`[${PLUGIN_ID}] render failed: ${error.stack || error.message}`);
+      }
     } finally {
       cleanupPreparedAnnouncement(preparation);
       active = null;
@@ -892,6 +905,35 @@ module.exports = function aisPlusAudio(app) {
   function cleanupPreparedAnnouncement(preparation) {
     if (!preparation) return;
     fs.rm(preparation.combinedWav, { force: true }, () => {});
+  }
+
+  function preemptActiveForPreparedAnnouncement() {
+    if (!active || !prepared?.entry) {
+      return false;
+    }
+    prepared.entry.blockedBy = {
+      id: active.id,
+      message: active.message,
+      priorityScore: active.priorityScore,
+    };
+    if (
+      !currentLocalPlaybackChild ||
+      currentLocalPlaybackEntry !== active ||
+      Number(prepared.entry.priorityScore || 0) <= Number(active.priorityScore || 0)
+    ) {
+      return false;
+    }
+    active.preemptedBy = {
+      id: prepared.entry.id,
+      message: prepared.entry.message,
+      priorityScore: prepared.entry.priorityScore,
+    };
+    addRecent(
+      "preempting",
+      `${prepared.entry.message} is interrupting lower-priority ${active.message}`,
+    );
+    currentLocalPlaybackChild.kill("SIGTERM");
+    return true;
   }
 
   function requeuePreparedEntry(entry) {
@@ -1534,12 +1576,24 @@ module.exports = function aisPlusAudio(app) {
       entry.queueToSpeakerMs = elapsedMs(entry.queuedAt, startedAt);
       entry.processingToSpeakerMs = elapsedMs(entry.processingStartedAt, startedAt);
       entry.preparedToSpeakerMs = elapsedMs(entry.preparedAt, startedAt);
+      const blocker = entry.blockedBy?.message
+        ? `, blocked by "${entry.blockedBy.message}"`
+        : "";
       addRecent(
         "speaker-started",
-        `${entry.message} (provider ${formatDurationMs(entry.generatedToSpeakerMs)}, queue ${formatDurationMs(entry.queueToSpeakerMs)}, synthesis ${formatDurationMs(entry.synthesisMs)}, ready wait ${formatDurationMs(entry.preparedToSpeakerMs)})`,
+        `${entry.message} (provider-to-speaker ${formatDurationMs(entry.generatedToSpeakerMs)}, queued-to-speaker ${formatDurationMs(entry.queueToSpeakerMs)}, synthesis ${formatDurationMs(entry.synthesisMs)}, ready wait ${formatDurationMs(entry.preparedToSpeakerMs)}${blocker})`,
       );
     }
-    await runProcess(options.audioPlayer, [file]);
+    currentLocalPlaybackEntry = entry;
+    try {
+      await runProcess(options.audioPlayer, [file], null, (child) => {
+        currentLocalPlaybackChild = child;
+        preemptActiveForPreparedAnnouncement();
+      });
+    } finally {
+      currentLocalPlaybackChild = null;
+      currentLocalPlaybackEntry = null;
+    }
     if (entry) {
       entry.localPlaybackCompletedAt = new Date().toISOString();
       entry.localPlaybackMs = elapsedMs(
@@ -1631,7 +1685,7 @@ module.exports = function aisPlusAudio(app) {
     });
   }
 
-  function runProcess(command, args, stdin = null) {
+  function runProcess(command, args, stdin = null, onSpawn = null) {
     return new Promise((resolve, reject) => {
       const tempBase = path.join(
         os.tmpdir(),
@@ -1693,6 +1747,7 @@ module.exports = function aisPlusAudio(app) {
       let child;
       try {
         child = spawn(command, args, { stdio: [stdinFd ?? "ignore", "ignore", stderrFd] });
+        onSpawn?.(child);
       } catch (error) {
         rejectOnce(error);
         return;

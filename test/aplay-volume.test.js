@@ -72,7 +72,7 @@ function statusOf(harness) {
   return status;
 }
 
-function sendNotification(harness, pathName, value) {
+function sendNotification(harness, pathName, value, priorityScore = 500) {
   assert.ok(harness.subscriptionCallbacks.length > 0, "subscription callback registered");
   harness.brokerSequence += 1;
   const alertEvent = value?.data?.alertEvent || {};
@@ -93,7 +93,7 @@ function sendNotification(harness, pathName, value) {
                 eventId: alertEvent.id || `${pathName}-${harness.brokerSequence}`,
                 lifecycle: "event",
                 timestamp: new Date().toISOString(),
-                priority: { level: "warning", score: 500 },
+                priority: { level: "warning", score: priorityScore },
                 delivery: {
                   audio: true,
                   localPlayback: true,
@@ -291,23 +291,41 @@ async function postVolume(harness, volume) {
     pipeline,
     "notifications.system.first",
     vesselNotification("pipeline-first", "First pipeline announcement."),
+    100,
   );
   await waitFor(() => statusOf(pipeline).active);
   sendNotification(
     pipeline,
     "notifications.system.second",
     vesselNotification("pipeline-second", "Second pipeline announcement."),
+    900,
   );
-  const pipelinedStatus = await waitFor(() => {
+  await waitFor(() => {
     const status = statusOf(pipeline);
-    return status.active && status.prepared ? status : null;
+    return status.recentEvents.some((event) => event.event === "preempting")
+      ? status
+      : null;
   });
-  assert.equal(
-    pipelinedStatus.prepared.message,
-    "Second pipeline announcement.",
-    "next announcement is rendered while the speaker is busy",
+  const completedPipelineStatus = await waitFor(
+    () => {
+      const status = statusOf(pipeline);
+      const preempted = status.recentEvents.some(
+        (event) => event.event === "preempted",
+      );
+      const secondStarted = status.recentEvents.some(
+        (event) =>
+          event.event === "speaker-started" &&
+          event.message.includes("Second pipeline announcement."),
+      );
+      return preempted && secondStarted ? status : null;
+    },
+    2500,
   );
-  await waitFor(() => statusOf(pipeline).stats.rendered >= 2, 2500);
+  assert.equal(
+    completedPipelineStatus.stats.failed,
+    0,
+    "priority interruption is not counted as a rendering failure",
+  );
   pipeline.plugin.stop();
   fs.rmSync(pipeline.tempDir, { recursive: true, force: true });
 
