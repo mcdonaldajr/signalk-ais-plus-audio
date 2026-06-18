@@ -248,7 +248,18 @@ async function postVolume(harness, volume) {
     "notifications.collision.235900001",
     vesselNotification("235900001", "Traffic advisory. First vessel."),
   );
-  assert.ok(statusOf(queuedMute).active, "first announcement is active");
+  const activeTimingStatus = statusOf(queuedMute);
+  assert.ok(activeTimingStatus.active, "first announcement is active");
+  assert.ok(activeTimingStatus.active.receivedAt, "receipt timestamp is recorded");
+  assert.ok(activeTimingStatus.active.queuedAt, "queue timestamp is recorded");
+  assert.ok(
+    activeTimingStatus.active.processingStartedAt,
+    "processing timestamp is recorded",
+  );
+  assert.ok(
+    Number.isFinite(activeTimingStatus.active.queueWaitMs),
+    "queue wait is measured",
+  );
   sendNotification(
     queuedMute,
     "notifications.collision.235900002",

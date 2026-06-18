@@ -601,6 +601,7 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function handleNotificationsPlusAudio(envelope) {
+    const receivedAt = new Date().toISOString();
     const muteState = envelope?.delivery?.muteState;
     if (muteState === true) {
       aisPlusMuted = true;
@@ -622,6 +623,7 @@ module.exports = function aisPlusAudio(app) {
       normalizeAnnouncement({
         id: envelope.eventId,
         ts: envelope.timestamp,
+        receivedAt,
         expiresAt: envelope.audioExpiresAt || envelope.expiresAt || null,
         vesselId: envelope.subjectKey || "",
         mmsi: envelope.context?.mmsi || "",
@@ -665,6 +667,8 @@ module.exports = function aisPlusAudio(app) {
       }
     }
 
+    entry.queuedAt = entry.queuedAt || new Date().toISOString();
+    entry.queueDepthAtEnqueue = queue.length;
     queue.push(entry);
     queue.sort(
       (left, right) =>
@@ -676,13 +680,30 @@ module.exports = function aisPlusAudio(app) {
       addRecent("warning", "Dropped stale queued announcements");
     }
     stats.queued += 1;
-    addRecent("queued", entry.message);
+    addRecent("queued", `${entry.message} (${timingAgeText(entry.timestamp, entry.queuedAt)} from provider)`);
     processQueue();
   }
 
   async function processQueue() {
     if (active || queue.length === 0) return;
     active = queue.shift();
+    active.processingStartedAt = new Date().toISOString();
+    active.queueWaitMs = elapsedMs(active.queuedAt, active.processingStartedAt);
+    active.generatedToProcessingMs = elapsedMs(active.timestamp, active.processingStartedAt);
+    if (announcementExpired(active)) {
+      stats.filtered += 1;
+      addRecent(
+        "expired",
+        `Dropped expired announcement after ${formatDurationMs(active.generatedToProcessingMs)}: ${active.message}`,
+      );
+      active = null;
+      processQueue();
+      return;
+    }
+    addRecent(
+      "processing",
+      `${active.message} (queue ${formatDurationMs(active.queueWaitMs)}, total ${formatDurationMs(active.generatedToProcessingMs)})`,
+    );
     try {
       const rendered = await renderAnnouncement(active);
       lastAnnouncement = rendered;
@@ -715,7 +736,10 @@ module.exports = function aisPlusAudio(app) {
     const metadataFile = path.join(audioDir, `${baseName}.json`);
 
     try {
+      entry.synthesisStartedAt = new Date().toISOString();
       await synthesizePiperWav(formatMessageForSpeech(entry.message), speechWav);
+      entry.synthesisCompletedAt = new Date().toISOString();
+      entry.synthesisMs = elapsedMs(entry.synthesisStartedAt, entry.synthesisCompletedAt);
       const clock = extractClockPosition(entry);
       const shouldPing = options.pingEnabled && clock != null;
       if (shouldPing) {
@@ -730,7 +754,25 @@ module.exports = function aisPlusAudio(app) {
         pingWav: shouldPing ? pingWav : null,
         combinedWav,
       });
+      entry.wavReadyAt = new Date().toISOString();
+      entry.generatedToWavReadyMs = elapsedMs(entry.timestamp, entry.wavReadyAt);
+
+      const shouldPlayLocally =
+        !entry.streamOnly &&
+        entry.localPlayback !== false &&
+        options.localPlayback &&
+        !isAudioMutedForEntry(entry);
+      const localPlaybackPromise = shouldPlayLocally
+        ? playLocalWav(combinedWav, entry).then(
+            () => null,
+            (error) => error,
+          )
+        : Promise.resolve(null);
+
+      entry.mp3StartedAt = new Date().toISOString();
       await createMp3(combinedWav, mp3File);
+      entry.mp3CompletedAt = new Date().toISOString();
+      entry.mp3Ms = elapsedMs(entry.mp3StartedAt, entry.mp3CompletedAt);
 
       const rendered = {
         ...entry,
@@ -747,9 +789,16 @@ module.exports = function aisPlusAudio(app) {
         await broadcastMp3ToLiveStream(mp3File);
       }
 
-      if (!entry.streamOnly && entry.localPlayback !== false && options.localPlayback && !isAudioMutedForEntry(entry)) {
-        await playLocalWav(combinedWav);
-      }
+      const localPlaybackError = await localPlaybackPromise;
+      if (localPlaybackError) throw localPlaybackError;
+      rendered.localPlaybackStartedAt = entry.localPlaybackStartedAt || null;
+      rendered.localPlaybackCompletedAt = entry.localPlaybackCompletedAt || null;
+      rendered.generatedToSpeakerMs = elapsedMs(entry.timestamp, entry.localPlaybackStartedAt);
+      rendered.queueToSpeakerMs = elapsedMs(entry.queuedAt, entry.localPlaybackStartedAt);
+      rendered.processingToSpeakerMs = elapsedMs(
+        entry.processingStartedAt,
+        entry.localPlaybackStartedAt,
+      );
 
       return rendered;
     } finally {
@@ -778,6 +827,8 @@ module.exports = function aisPlusAudio(app) {
       sizeCategory: normalizeSizeCategory(value.sizeCategory),
       message: String(value.message || "").trim(),
       sourcePath: String(value.sourcePath || ""),
+      receivedAt: String(value.receivedAt || new Date().toISOString()),
+      queuedAt: value.queuedAt ? String(value.queuedAt) : null,
       force: value.force === true,
       streamOnly: value.streamOnly === true,
       localPlayback: value.localPlayback !== false,
@@ -1350,13 +1401,55 @@ module.exports = function aisPlusAudio(app) {
     return `${publicStreamProtocol()}://${process.env.EXTERNALHOST || "nemo3.local"}:${port}`;
   }
 
-  async function playLocalWav(file) {
+  async function playLocalWav(file, entry = null) {
     try {
       await applyAplayVolume("playback");
     } catch (error) {
       addRecent("warning", `Local speaker volume not applied before playback: ${error.message}`);
     }
-    return runProcess(options.audioPlayer, [file]);
+    const startedAt = new Date().toISOString();
+    if (entry) {
+      entry.localPlaybackStartedAt = startedAt;
+      entry.generatedToSpeakerMs = elapsedMs(entry.timestamp, startedAt);
+      entry.queueToSpeakerMs = elapsedMs(entry.queuedAt, startedAt);
+      entry.processingToSpeakerMs = elapsedMs(entry.processingStartedAt, startedAt);
+      addRecent(
+        "speaker-started",
+        `${entry.message} (provider ${formatDurationMs(entry.generatedToSpeakerMs)}, queue ${formatDurationMs(entry.queueToSpeakerMs)}, synthesis ${formatDurationMs(entry.synthesisMs)})`,
+      );
+    }
+    await runProcess(options.audioPlayer, [file]);
+    if (entry) {
+      entry.localPlaybackCompletedAt = new Date().toISOString();
+      entry.localPlaybackMs = elapsedMs(
+        entry.localPlaybackStartedAt,
+        entry.localPlaybackCompletedAt,
+      );
+    }
+  }
+
+  function announcementExpired(entry, now = Date.now()) {
+    if (entry?.force === true || !entry?.expiresAt) return false;
+    const expiresAt = Date.parse(entry.expiresAt);
+    return Number.isFinite(expiresAt) && expiresAt <= now;
+  }
+
+  function elapsedMs(from, to) {
+    const start = Date.parse(from || "");
+    const end = Date.parse(to || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    return Math.max(0, end - start);
+  }
+
+  function formatDurationMs(value) {
+    const milliseconds = Number(value);
+    if (!Number.isFinite(milliseconds)) return "unknown";
+    if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+    return `${(milliseconds / 1000).toFixed(milliseconds < 10000 ? 2 : 1)} s`;
+  }
+
+  function timingAgeText(from, to) {
+    return formatDurationMs(elapsedMs(from, to));
   }
 
   async function applyAplayVolume(reason) {
