@@ -649,6 +649,7 @@ module.exports = function aisPlusAudio(app) {
         vesselName: envelope.presentation?.title || "",
         severity: envelope.priority?.level || "information",
         priorityScore: Number(envelope.priority?.score) || 0,
+        preempt: envelope.delivery?.preempt !== false,
         category: envelope.presentation?.category || "notification",
         message,
         sourcePath: NOTIFICATIONS_PLUS_PATH,
@@ -931,6 +932,7 @@ module.exports = function aisPlusAudio(app) {
       !currentLocalPlaybackChild ||
       currentLocalPlaybackEntry !== active ||
       Number(prepared.entry.priorityScore || 0) <= Number(active.priorityScore || 0)
+      || prepared.entry.preempt === false
     ) {
       return false;
     }
@@ -1030,6 +1032,7 @@ module.exports = function aisPlusAudio(app) {
       vesselName: String(value.vesselName || ""),
       severity: String(value.severity || "alert"),
       priorityScore: Number(value.priorityScore) || 0,
+      preempt: value.preempt !== false,
       category: String(value.category || "cpa"),
       clock: normalizeClock(value.clock),
       sizeCategory: normalizeSizeCategory(value.sizeCategory),

@@ -79,6 +79,7 @@ function sendNotification(
   priorityScore = 500,
   lifecycle = "event",
   activeSubjects = [],
+  preempt = true,
 ) {
   assert.ok(harness.subscriptionCallbacks.length > 0, "subscription callback registered");
   harness.brokerSequence += 1;
@@ -107,6 +108,7 @@ function sendNotification(
                   localPlayback: true,
                   streamOutput: true,
                   muteState,
+                  preempt,
                 },
                 presentation: {
                   title: alertEvent.vesselName || "AIS Plus",
@@ -351,6 +353,41 @@ async function postVolume(harness, volume) {
   pipeline.plugin.stop();
   await new Promise((resolve) => setTimeout(resolve, 50));
   fs.rmSync(pipeline.tempDir, { recursive: true, force: true });
+
+  const nonPreempting = createPipelineHarness();
+  sendNotification(
+    nonPreempting,
+    "notifications.system.playing",
+    vesselNotification("non-preempting-first", "Message already playing."),
+    100,
+  );
+  await waitFor(() => statusOf(nonPreempting).active);
+  sendNotification(
+    nonPreempting,
+    "notifications.system.information",
+    vesselNotification("non-preempting-second", "Routine information."),
+    900,
+    "event",
+    [],
+    false,
+  );
+  const waitingInformation = await waitFor(() => {
+    const status = statusOf(nonPreempting);
+    return status.active && status.prepared ? status : null;
+  });
+  assert.equal(
+    waitingInformation.active.message,
+    "Message already playing.",
+    "non-preempting provider instruction leaves current audio uninterrupted",
+  );
+  assert.equal(
+    waitingInformation.recentEvents.some((event) => event.event === "preempting"),
+    false,
+  );
+  await waitFor(() => statusOf(nonPreempting).stats.rendered >= 2, 2500);
+  nonPreempting.plugin.stop();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  fs.rmSync(nonPreempting.tempDir, { recursive: true, force: true });
 
   const queuedMute = createSlowRenderHarness();
   sendNotification(
