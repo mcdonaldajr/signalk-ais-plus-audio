@@ -1,6 +1,6 @@
 {
   "name": "signalk-ais-plus-audio",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Piper audio renderer and browser audio bridge for Notifications Plus delivery events.",
   "main": "plugin/index.js",
   "scripts": {

@@ -28,6 +28,8 @@ module.exports = function aisPlusAudio(app) {
   let unsubscribes = [];
   let queue = [];
   let active = null;
+  let preparing = null;
+  let prepared = null;
   let lastAnnouncement = null;
   let aisPlusMuted = false;
   let lastNotificationsPlusAudioSequence = 0;
@@ -100,6 +102,8 @@ module.exports = function aisPlusAudio(app) {
     unsubscribes = [];
     queue = [];
     active = null;
+    preparing = null;
+    prepared = null;
     aisPlusMuted = false;
     stopLiveStreamSilence();
     for (const client of Array.from(liveStreamClients)) {
@@ -665,16 +669,41 @@ module.exports = function aisPlusAudio(app) {
           `Dropped ${removed} stale queued announcement${removed === 1 ? "" : "s"} for ${announcementDisplayName(entry)}`,
         );
       }
+      for (const pending of [preparing?.entry, prepared?.entry]) {
+        if (announcementSupersedeKey(pending) === supersedeKey) {
+          pending.superseded = true;
+          addRecent(
+            "superseded",
+            `Dropped stale pre-rendered announcement for ${announcementDisplayName(entry)}`,
+          );
+        }
+      }
+    }
+
+    if (
+      prepared?.entry &&
+      !prepared.entry.superseded &&
+      Number(entry.priorityScore || 0) > Number(prepared.entry.priorityScore || 0)
+    ) {
+      const displaced = prepared;
+      prepared = null;
+      displaced.entry.superseded = true;
+      displaced.mp3Promise.finally(() => {
+        cleanupPreparedAnnouncement(displaced);
+        queue.push(requeuePreparedEntry(displaced.entry));
+        sortAnnouncementQueue();
+        processQueue();
+      });
+      addRecent(
+        "reprioritized",
+        `Prepared ${displaced.entry.message} again after higher-priority ${entry.message}`,
+      );
     }
 
     entry.queuedAt = entry.queuedAt || new Date().toISOString();
     entry.queueDepthAtEnqueue = queue.length;
     queue.push(entry);
-    queue.sort(
-      (left, right) =>
-        Number(right.priorityScore || 0) - Number(left.priorityScore || 0) ||
-        Date.parse(left.timestamp || 0) - Date.parse(right.timestamp || 0),
-    );
+    sortAnnouncementQueue();
     if (queue.length > options.maxQueueLength) {
       queue = queue.slice(0, options.maxQueueLength);
       addRecent("warning", "Dropped stale queued announcements");
@@ -685,44 +714,60 @@ module.exports = function aisPlusAudio(app) {
   }
 
   async function processQueue() {
-    if (active || queue.length === 0) return;
-    active = queue.shift();
-    active.processingStartedAt = new Date().toISOString();
-    active.queueWaitMs = elapsedMs(active.queuedAt, active.processingStartedAt);
-    active.generatedToProcessingMs = elapsedMs(active.timestamp, active.processingStartedAt);
-    if (announcementExpired(active)) {
+    if (!active && prepared) {
+      const next = prepared;
+      prepared = null;
+      if (next.entry.superseded || announcementExpired(next.entry)) {
+        if (!next.entry.superseded) {
+          stats.filtered += 1;
+          addRecent(
+            "expired",
+            `Dropped expired prepared announcement: ${next.entry.message}`,
+          );
+        }
+        cleanupPreparedAnnouncement(next);
+      } else {
+        deliverPreparedAnnouncement(next);
+      }
+    }
+    if (preparing || prepared || queue.length === 0) return;
+
+    const entry = queue.shift();
+    entry.processingStartedAt = new Date().toISOString();
+    entry.queueWaitMs = elapsedMs(entry.queuedAt, entry.processingStartedAt);
+    entry.generatedToProcessingMs = elapsedMs(entry.timestamp, entry.processingStartedAt);
+    if (announcementExpired(entry)) {
       stats.filtered += 1;
       addRecent(
         "expired",
-        `Dropped expired announcement after ${formatDurationMs(active.generatedToProcessingMs)}: ${active.message}`,
+        `Dropped expired announcement after ${formatDurationMs(entry.generatedToProcessingMs)}: ${entry.message}`,
       );
-      active = null;
       processQueue();
       return;
     }
     addRecent(
       "processing",
-      `${active.message} (queue ${formatDurationMs(active.queueWaitMs)}, total ${formatDurationMs(active.generatedToProcessingMs)})`,
+      `${entry.message} (queue ${formatDurationMs(entry.queueWaitMs)}, total ${formatDurationMs(entry.generatedToProcessingMs)})`,
     );
+    preparing = { entry };
     try {
-      const rendered = await renderAnnouncement(active);
-      lastAnnouncement = rendered;
-      if (rendered.category !== "stream-health") {
-        lastRealAnnouncementAt = Date.now();
+      const next = await prepareAnnouncement(entry);
+      preparing = null;
+      if (entry.superseded) {
+        cleanupPreparedAnnouncement(next);
+      } else {
+        prepared = next;
       }
-      stats.rendered += 1;
-      addRecent("rendered", rendered.message);
     } catch (error) {
+      preparing = null;
       stats.failed += 1;
       addRecent("error", `Render failed: ${error.message}`);
       app.error(`[${PLUGIN_ID}] render failed: ${error.stack || error.message}`);
-    } finally {
-      active = null;
-      processQueue();
     }
+    processQueue();
   }
 
-  async function renderAnnouncement(entry) {
+  async function prepareAnnouncement(entry) {
     const audioDir = expandHome(options.audioDirectory);
     await fs.promises.mkdir(audioDir, { recursive: true });
 
@@ -735,28 +780,56 @@ module.exports = function aisPlusAudio(app) {
     const mp3File = path.join(audioDir, mp3FileName);
     const metadataFile = path.join(audioDir, `${baseName}.json`);
 
+    entry.synthesisStartedAt = new Date().toISOString();
+    await synthesizePiperWav(formatMessageForSpeech(entry.message), speechWav);
+    entry.synthesisCompletedAt = new Date().toISOString();
+    entry.synthesisMs = elapsedMs(entry.synthesisStartedAt, entry.synthesisCompletedAt);
+    const clock = extractClockPosition(entry);
+    const shouldPing = options.pingEnabled && clock != null;
+    if (shouldPing) {
+      await fs.promises.writeFile(
+        pingWav,
+        createPingWav(clock, extractVesselSize(entry), pingCountForClock(clock)),
+      );
+    }
+
+    await createCombinedWav({
+      speechWav,
+      pingWav: shouldPing ? pingWav : null,
+      combinedWav,
+    });
+    entry.wavReadyAt = new Date().toISOString();
+    entry.preparedAt = entry.wavReadyAt;
+    entry.generatedToWavReadyMs = elapsedMs(entry.timestamp, entry.wavReadyAt);
+    fs.rm(speechWav, { force: true }, () => {});
+    fs.rm(pingWav, { force: true }, () => {});
+
+    const mp3Promise = (async () => {
+      entry.mp3StartedAt = new Date().toISOString();
+      await createMp3(combinedWav, mp3File);
+      entry.mp3CompletedAt = new Date().toISOString();
+      entry.mp3Ms = elapsedMs(entry.mp3StartedAt, entry.mp3CompletedAt);
+    })().then(
+      () => null,
+      (error) => error,
+    );
+
+    return {
+      entry,
+      combinedWav,
+      mp3File,
+      mp3FileName,
+      metadataFile,
+      mp3Promise,
+    };
+  }
+
+  async function deliverPreparedAnnouncement(preparation) {
+    const { entry, combinedWav, mp3File, mp3FileName, metadataFile, mp3Promise } =
+      preparation;
+    active = entry;
+    processQueue();
     try {
-      entry.synthesisStartedAt = new Date().toISOString();
-      await synthesizePiperWav(formatMessageForSpeech(entry.message), speechWav);
-      entry.synthesisCompletedAt = new Date().toISOString();
-      entry.synthesisMs = elapsedMs(entry.synthesisStartedAt, entry.synthesisCompletedAt);
-      const clock = extractClockPosition(entry);
-      const shouldPing = options.pingEnabled && clock != null;
-      if (shouldPing) {
-        await fs.promises.writeFile(
-          pingWav,
-          createPingWav(clock, extractVesselSize(entry), pingCountForClock(clock)),
-        );
-      }
-
-      await createCombinedWav({
-        speechWav,
-        pingWav: shouldPing ? pingWav : null,
-        combinedWav,
-      });
-      entry.wavReadyAt = new Date().toISOString();
-      entry.generatedToWavReadyMs = elapsedMs(entry.timestamp, entry.wavReadyAt);
-
       const shouldPlayLocally =
         !entry.streamOnly &&
         entry.localPlayback !== false &&
@@ -769,10 +842,8 @@ module.exports = function aisPlusAudio(app) {
           )
         : Promise.resolve(null);
 
-      entry.mp3StartedAt = new Date().toISOString();
-      await createMp3(combinedWav, mp3File);
-      entry.mp3CompletedAt = new Date().toISOString();
-      entry.mp3Ms = elapsedMs(entry.mp3StartedAt, entry.mp3CompletedAt);
+      const mp3Error = await mp3Promise;
+      if (mp3Error) throw mp3Error;
 
       const rendered = {
         ...entry,
@@ -800,12 +871,53 @@ module.exports = function aisPlusAudio(app) {
         entry.localPlaybackStartedAt,
       );
 
-      return rendered;
-    } finally {
-      for (const file of [speechWav, pingWav, combinedWav]) {
-        fs.rm(file, { force: true }, () => {});
+      lastAnnouncement = rendered;
+      if (rendered.category !== "stream-health") {
+        lastRealAnnouncementAt = Date.now();
       }
+      stats.rendered += 1;
+      addRecent("rendered", rendered.message);
+      return rendered;
+    } catch (error) {
+      stats.failed += 1;
+      addRecent("error", `Render failed: ${error.message}`);
+      app.error(`[${PLUGIN_ID}] render failed: ${error.stack || error.message}`);
+    } finally {
+      cleanupPreparedAnnouncement(preparation);
+      active = null;
+      processQueue();
     }
+  }
+
+  function cleanupPreparedAnnouncement(preparation) {
+    if (!preparation) return;
+    fs.rm(preparation.combinedWav, { force: true }, () => {});
+  }
+
+  function requeuePreparedEntry(entry) {
+    const requeued = {
+      ...entry,
+      superseded: false,
+      processingStartedAt: null,
+      synthesisStartedAt: null,
+      synthesisCompletedAt: null,
+      synthesisMs: null,
+      wavReadyAt: null,
+      preparedAt: null,
+      generatedToWavReadyMs: null,
+      mp3StartedAt: null,
+      mp3CompletedAt: null,
+      mp3Ms: null,
+    };
+    return requeued;
+  }
+
+  function sortAnnouncementQueue() {
+    queue.sort(
+      (left, right) =>
+        Number(right.priorityScore || 0) - Number(left.priorityScore || 0) ||
+        Date.parse(left.timestamp || 0) - Date.parse(right.timestamp || 0),
+    );
   }
 
   function normalizeAnnouncement(value) {
@@ -857,6 +969,12 @@ module.exports = function aisPlusAudio(app) {
   function clearQueuedAnnouncements(reason) {
     const removed = queue.length;
     queue = [];
+    if (preparing?.entry) preparing.entry.superseded = true;
+    if (prepared?.entry) {
+      prepared.entry.superseded = true;
+      cleanupPreparedAnnouncement(prepared);
+      prepared = null;
+    }
     addRecent(
       "queue-cleared",
       `${reason}: ${removed > 0 ? `dropped ${removed} queued announcement${removed === 1 ? "" : "s"}` : "queue already empty"}`,
@@ -931,6 +1049,8 @@ module.exports = function aisPlusAudio(app) {
       pingVolumePercent: options.pingVolumePercent,
       queueLength: queue.length,
       active,
+      preparing: preparing?.entry || null,
+      prepared: prepared?.entry || null,
       lastAnnouncement: publishedLastAnnouncement,
       recentEvents: recentEvents.slice().reverse(),
       stats,
@@ -1413,9 +1533,10 @@ module.exports = function aisPlusAudio(app) {
       entry.generatedToSpeakerMs = elapsedMs(entry.timestamp, startedAt);
       entry.queueToSpeakerMs = elapsedMs(entry.queuedAt, startedAt);
       entry.processingToSpeakerMs = elapsedMs(entry.processingStartedAt, startedAt);
+      entry.preparedToSpeakerMs = elapsedMs(entry.preparedAt, startedAt);
       addRecent(
         "speaker-started",
-        `${entry.message} (provider ${formatDurationMs(entry.generatedToSpeakerMs)}, queue ${formatDurationMs(entry.queueToSpeakerMs)}, synthesis ${formatDurationMs(entry.synthesisMs)})`,
+        `${entry.message} (provider ${formatDurationMs(entry.generatedToSpeakerMs)}, queue ${formatDurationMs(entry.queueToSpeakerMs)}, synthesis ${formatDurationMs(entry.synthesisMs)}, ready wait ${formatDurationMs(entry.preparedToSpeakerMs)})`,
       );
     }
     await runProcess(options.audioPlayer, [file]);

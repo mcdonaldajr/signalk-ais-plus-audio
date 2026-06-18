@@ -167,6 +167,49 @@ function createSlowRenderHarness() {
   return { ...harness, tempDir };
 }
 
+function createPipelineHarness() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ais-plus-audio-pipeline-"));
+  const voicesDir = path.join(tempDir, "voices");
+  fs.mkdirSync(voicesDir, { recursive: true });
+  fs.writeFileSync(path.join(voicesDir, "en_GB-alan-medium.onnx"), "");
+  const piperBinary = path.join(tempDir, "piper.sh");
+  const ffmpegBinary = path.join(tempDir, "ffmpeg.sh");
+  const audioPlayer = path.join(tempDir, "aplay.sh");
+  fs.writeFileSync(
+    piperBinary,
+    '#!/bin/sh\nout=""\nwhile [ "$#" -gt 0 ]; do\n  if [ "$1" = "--output_file" ]; then out="$2"; shift 2; else shift; fi\ndone\nprintf wav > "$out"\n',
+  );
+  fs.writeFileSync(
+    ffmpegBinary,
+    '#!/bin/sh\nfor arg in "$@"; do out="$arg"; done\nprintf wav > "$out"\n',
+  );
+  fs.writeFileSync(audioPlayer, "#!/bin/sh\nsleep 0.5\n");
+  for (const file of [piperBinary, ffmpegBinary, audioPlayer]) {
+    fs.chmodSync(file, 0o755);
+  }
+  const harness = createHarness({
+    audioDirectory: path.join(tempDir, "audio"),
+    audioPlayer,
+    ffmpegBinary,
+    liveStream: false,
+    localPlayback: true,
+    piperBinary,
+    publicHttpStream: false,
+    voicesDir,
+  });
+  return { ...harness, tempDir };
+}
+
+async function waitFor(predicate, timeoutMs = 1500) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = predicate();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for audio pipeline state");
+}
+
 async function postVolume(harness, volume) {
   let body;
   await harness.posts.get("/aplay-volume")(
@@ -242,6 +285,32 @@ async function postVolume(harness, volume) {
   assert.equal(statusOf(darwinSavedAmixer).aplayVolumeCommand, "");
   assert.equal(statusOf(darwinSavedAmixer).aplayVolumeEnabled, false);
   darwinSavedAmixer.plugin.stop();
+
+  const pipeline = createPipelineHarness();
+  sendNotification(
+    pipeline,
+    "notifications.system.first",
+    vesselNotification("pipeline-first", "First pipeline announcement."),
+  );
+  await waitFor(() => statusOf(pipeline).active);
+  sendNotification(
+    pipeline,
+    "notifications.system.second",
+    vesselNotification("pipeline-second", "Second pipeline announcement."),
+  );
+  const pipelinedStatus = await waitFor(() => {
+    const status = statusOf(pipeline);
+    return status.active && status.prepared ? status : null;
+  });
+  assert.equal(
+    pipelinedStatus.prepared.message,
+    "Second pipeline announcement.",
+    "next announcement is rendered while the speaker is busy",
+  );
+  await waitFor(() => statusOf(pipeline).stats.rendered >= 2, 2500);
+  pipeline.plugin.stop();
+  fs.rmSync(pipeline.tempDir, { recursive: true, force: true });
+
   const queuedMute = createSlowRenderHarness();
   sendNotification(
     queuedMute,
@@ -249,15 +318,19 @@ async function postVolume(harness, volume) {
     vesselNotification("235900001", "Traffic advisory. First vessel."),
   );
   const activeTimingStatus = statusOf(queuedMute);
-  assert.ok(activeTimingStatus.active, "first announcement is active");
-  assert.ok(activeTimingStatus.active.receivedAt, "receipt timestamp is recorded");
-  assert.ok(activeTimingStatus.active.queuedAt, "queue timestamp is recorded");
+  const firstPending =
+    activeTimingStatus.active ||
+    activeTimingStatus.preparing ||
+    activeTimingStatus.prepared;
+  assert.ok(firstPending, "first announcement is being prepared or played");
+  assert.ok(firstPending.receivedAt, "receipt timestamp is recorded");
+  assert.ok(firstPending.queuedAt, "queue timestamp is recorded");
   assert.ok(
-    activeTimingStatus.active.processingStartedAt,
+    firstPending.processingStartedAt,
     "processing timestamp is recorded",
   );
   assert.ok(
-    Number.isFinite(activeTimingStatus.active.queueWaitMs),
+    Number.isFinite(firstPending.queueWaitMs),
     "queue wait is measured",
   );
   sendNotification(
