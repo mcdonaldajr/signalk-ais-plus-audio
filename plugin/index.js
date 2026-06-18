@@ -19,6 +19,10 @@ const APLAY_VOLUME_LOG_BASE = 10;
 const DEFAULT_APLAY_VOLUME_CONTROL = "PCM";
 const DEFAULT_APLAY_VOLUME_COMMAND = "amixer";
 const APLAY_VOLUME_FALLBACK_CONTROLS = ["PCM", "Master", "Headphone", "Speaker"];
+const ANNOUNCEMENT_NOTIFICATION_ROOTS = [
+  "notifications.collision",
+  "notifications.audibleInstruments",
+];
 
 module.exports = function aisPlusAudio(app) {
   const plugin = {};
@@ -563,18 +567,10 @@ module.exports = function aisPlusAudio(app) {
 
     const subscription = {
       context: "vessels.self",
-      subscribe: [
-        {
-          path: "notifications.collision",
-          policy: "instant",
-          format: "delta",
-        },
-        {
-          path: "notifications.collision.*",
-          policy: "instant",
-          format: "delta",
-        },
-      ],
+      subscribe: ANNOUNCEMENT_NOTIFICATION_ROOTS.flatMap((notificationRoot) => [
+        { path: notificationRoot, policy: "instant", format: "delta" },
+        { path: `${notificationRoot}.*`, policy: "instant", format: "delta" },
+      ]),
     };
 
     app.subscriptionmanager.subscribe(
@@ -597,12 +593,15 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function handleNotificationValue(value) {
-    if (!value?.path?.startsWith("notifications.collision")) return;
+    const notificationRoot = ANNOUNCEMENT_NOTIFICATION_ROOTS.find(
+      (root) => value?.path === root || value?.path?.startsWith(`${root}.`),
+    );
+    if (!notificationRoot) return;
     stats.received += 1;
 
-    if (value.path === "notifications.collision" && value.value && typeof value.value === "object") {
+    if (value.path === notificationRoot && value.value && typeof value.value === "object") {
       for (const [id, notification] of Object.entries(value.value)) {
-        handleNotification(`notifications.collision.${id}`, notification);
+        handleNotification(`${notificationRoot}.${id}`, notification);
       }
       return;
     }

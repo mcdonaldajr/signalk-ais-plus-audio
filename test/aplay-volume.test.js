@@ -206,7 +206,6 @@ async function postVolume(harness, volume) {
   assert.equal(statusOf(darwinSavedAmixer).aplayVolumeCommand, "");
   assert.equal(statusOf(darwinSavedAmixer).aplayVolumeEnabled, false);
   darwinSavedAmixer.plugin.stop();
-
   const queuedMute = createSlowRenderHarness();
   sendNotification(
     queuedMute,
