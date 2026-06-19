@@ -1,5 +1,12 @@
 # AIS Plus Audio
 
+## Version 2 baseline
+
+`v2.0.0` promotes the current Notifications Plus renderer, Pi speaker pipeline,
+and live-stream implementation as the working audio baseline. It does not yet
+implement the proposed authoritative synchronized playback contract and does
+not intentionally change runtime behavior from `v1.4.7`.
+
 > **Alpha Release disclaimer:** This software is Alpha Release and has not been tested in live environments and must not be relied upon for navigation or safety. The Authors do not accept any responsibility for loss or damage as a result of using this software.
 
 AIS Plus Audio is the standalone renderer for Notifications Plus audio-delivery events.
@@ -41,7 +48,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v1.4.7 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.0.0 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
