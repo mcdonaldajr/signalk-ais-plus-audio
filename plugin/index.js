@@ -187,6 +187,15 @@ module.exports = function aisPlusAudio(app) {
         description: "Usually aplay on Raspberry Pi OS.",
         default: "aplay",
       },
+      speakerReleaseGapMs: {
+        type: "integer",
+        title: "Speaker release gap (milliseconds)",
+        description:
+          "Keeps the speaker reserved briefly after aplay exits so the final buffered words finish before another announcement starts.",
+        default: 500,
+        minimum: 0,
+        maximum: 3000,
+      },
       aplayVolumeLevelPercent: {
         type: "number",
         title: "Local speaker level (%)",
@@ -526,6 +535,7 @@ module.exports = function aisPlusAudio(app) {
       piperBinary: expandHome(String(value.piperBinary || "piper")),
       ffmpegBinary: expandHome(String(value.ffmpegBinary || "ffmpeg")),
       audioPlayer: expandHome(String(value.audioPlayer || "aplay")),
+      speakerReleaseGapMs: clampInteger(value.speakerReleaseGapMs, 0, 3000, 500),
       aplayVolumeLevelPercent: normalizeAplayVolumeLevelPercent(
         value.aplayVolumeLevelPercent,
         value.aplayVolumePercent,
@@ -1160,6 +1170,7 @@ module.exports = function aisPlusAudio(app) {
       aplayVolumeCommand: options.aplayVolumeCommand,
       aplayVolumeEnabled: Boolean(options.localPlayback && options.aplayVolumeCommand),
       aplayVolumeControl: options.aplayVolumeControl,
+      speakerReleaseGapMs: options.speakerReleaseGapMs,
       lastAplayVolumeSetAt,
       lastAplayVolumeError,
       lastAplayVolumeControl,
@@ -1662,7 +1673,7 @@ module.exports = function aisPlusAudio(app) {
     }
     currentLocalPlaybackEntry = entry;
     try {
-      await runProcess(options.audioPlayer, [file], null, (child) => {
+    await runProcess(options.audioPlayer, [file], null, (child) => {
         currentLocalPlaybackChild = child;
         preemptActiveForPreparedAnnouncement();
       });
@@ -1677,6 +1688,16 @@ module.exports = function aisPlusAudio(app) {
         entry.localPlaybackCompletedAt,
       );
     }
+    if (options.speakerReleaseGapMs > 0) {
+      await delay(options.speakerReleaseGapMs);
+    }
+    if (entry) {
+      entry.speakerReleasedAt = new Date().toISOString();
+    }
+  }
+
+  function delay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
   function announcementExpired(entry, now = Date.now()) {

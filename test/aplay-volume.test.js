@@ -28,6 +28,7 @@ function createHarness(initialOptions = {}, harnessOptions = {}) {
     publicHttpStream: false,
     liveStream: false,
     localPlayback: true,
+    speakerReleaseGapMs: 10,
     ...initialOptions,
   };
   if (harnessOptions.disableMixer !== false && initialOptions.aplayVolumeCommand == null) {
