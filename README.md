@@ -17,7 +17,7 @@ Standards-compatible Signal K notification
 
 ## Current State
 
-Version `1.4.5` consumes the Notifications Plus audio projection. This gives all providers common priority ordering, subject supersession, freshness, and output instructions without Audio interpreting message content. It creates Piper WAV speech, can prepend the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, publishes read-only status at `vessels.self.plugins.aisPlusAudio`, can play the combined WAV locally on the Signal K server, and exposes generated files plus a continuous radio-style MP3 stream on the public stream port for read-only clients.
+Version `1.4.6` consumes the Notifications Plus audio projection. This gives all providers common priority ordering, subject supersession, freshness, and output instructions without Audio interpreting message content. It creates Piper WAV speech, can prepend the stereo directional ping, creates a browser-friendly MP3, serves generated files from the plugin router, publishes read-only status at `vessels.self.plugins.aisPlusAudio`, can play the combined WAV locally on the Signal K server, and exposes generated files plus a continuous radio-style MP3 stream on the public stream port for read-only clients.
 
 Local speaker playback starts as soon as Piper speech and the combined WAV are ready. MP3 encoding and live-stream publication proceed alongside speaker playback instead of delaying it. Recent events and the published status include provider, receipt, queue, processing, synthesis, WAV-ready, speaker-start, speaker-finish, and MP3 timestamps so a slow provider, queue backlog, Piper, ALSA, or stream stage can be identified directly.
 
@@ -29,6 +29,8 @@ Version `1.4.4` restarts an interrupted lower-priority announcement from the beg
 
 Version `1.4.5` follows the provider's explicit `delivery.preempt` instruction. Routine informational announcements may be queued and pre-rendered but cannot interrupt any message already using the speaker.
 
+Version `1.4.6` closes a preparation race: when a higher-priority event arrives while Piper is synthesizing a lower-priority event, the completed lower-priority WAV must rejoin the queue instead of claiming the speaker ahead of the newer urgent event.
+
 Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. The local speaker level setting uses a logarithmic curve and applies the matching ALSA mixer volume at AIS Plus Audio startup and before local `aplay` playback. Level `0%` maps to `66%` on the mixer, level `100%` maps to `100%`, and old linear mixer-volume settings are migrated onto the new curve. It tries the configured mixer control first, then common Pi/ALSA controls such as `PCM`, `Master`, `Headphone`, and `Speaker`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
 
 The radio stream is intended for iPhone/iPad/Android apps that can keep a stream alive while the device is locked.
@@ -37,7 +39,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v1.4.5 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v1.4.6 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 

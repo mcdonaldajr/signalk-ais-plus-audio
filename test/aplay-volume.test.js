@@ -177,7 +177,7 @@ function createSlowRenderHarness() {
   return { ...harness, tempDir };
 }
 
-function createPipelineHarness() {
+function createPipelineHarness({ piperDelaySeconds = 0 } = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ais-plus-audio-pipeline-"));
   const voicesDir = path.join(tempDir, "voices");
   fs.mkdirSync(voicesDir, { recursive: true });
@@ -187,7 +187,7 @@ function createPipelineHarness() {
   const audioPlayer = path.join(tempDir, "aplay.sh");
   fs.writeFileSync(
     piperBinary,
-    '#!/bin/sh\nout=""\nwhile [ "$#" -gt 0 ]; do\n  if [ "$1" = "--output_file" ]; then out="$2"; shift 2; else shift; fi\ndone\nprintf wav > "$out"\n',
+    `#!/bin/sh\nout=""\nwhile [ "$#" -gt 0 ]; do\n  if [ "$1" = "--output_file" ]; then out="$2"; shift 2; else shift; fi\ndone\nsleep ${piperDelaySeconds}\nprintf wav > "$out"\n`,
   );
   fs.writeFileSync(
     ffmpegBinary,
@@ -388,6 +388,84 @@ async function postVolume(harness, volume) {
   nonPreempting.plugin.stop();
   await new Promise((resolve) => setTimeout(resolve, 50));
   fs.rmSync(nonPreempting.tempDir, { recursive: true, force: true });
+
+  const lowerPriority = createPipelineHarness();
+  sendNotification(
+    lowerPriority,
+    "notifications.collision.high",
+    vesselNotification("higher-priority", "Higher priority announcement."),
+    900,
+  );
+  await waitFor(() => statusOf(lowerPriority).active);
+  sendNotification(
+    lowerPriority,
+    "notifications.system.low",
+    vesselNotification("lower-priority", "Lower priority announcement."),
+    100,
+    "event",
+    [],
+    true,
+  );
+  const lowerWaiting = await waitFor(() => {
+    const status = statusOf(lowerPriority);
+    return status.active && status.prepared ? status : null;
+  });
+  assert.equal(
+    lowerWaiting.active.message,
+    "Higher priority announcement.",
+    "lower-priority prepared audio cannot replace the active speaker owner",
+  );
+  assert.equal(
+    lowerWaiting.recentEvents.some((event) => event.event === "preempting"),
+    false,
+    "lower-priority preempt permission does not override score ordering",
+  );
+  await waitFor(() => statusOf(lowerPriority).stats.rendered >= 2, 2500);
+  lowerPriority.plugin.stop();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  fs.rmSync(lowerPriority.tempDir, { recursive: true, force: true });
+
+  const preparationRace = createPipelineHarness({ piperDelaySeconds: 0.2 });
+  sendNotification(
+    preparationRace,
+    "notifications.collision.warning",
+    vesselNotification("preparing-warning", "Warning preparing first."),
+    500,
+  );
+  await waitFor(() => statusOf(preparationRace).preparing);
+  sendNotification(
+    preparationRace,
+    "notifications.collision.alarm",
+    vesselNotification("queued-alarm", "Alarm arrived during synthesis."),
+    800,
+  );
+  const alarmWonRace = await waitFor(
+    () => {
+      const status = statusOf(preparationRace);
+      const starts = status.recentEvents
+        .filter((event) => event.event === "speaker-started")
+        .map((event) => event.message);
+      return starts.length > 0 ? { status, starts } : null;
+    },
+    3000,
+  );
+  assert.match(
+    alarmWonRace.starts[0],
+    /Alarm arrived during synthesis/,
+    "higher-priority event queued during lower-priority synthesis gets the speaker first",
+  );
+  assert.equal(
+    alarmWonRace.status.recentEvents.some(
+      (event) =>
+        event.event === "reprioritized" &&
+        event.message.includes("arrived during synthesis"),
+    ),
+    true,
+  );
+  await waitFor(() => statusOf(preparationRace).stats.rendered >= 2, 4000);
+  preparationRace.plugin.stop();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  fs.rmSync(preparationRace.tempDir, { recursive: true, force: true });
 
   const queuedMute = createSlowRenderHarness();
   sendNotification(
