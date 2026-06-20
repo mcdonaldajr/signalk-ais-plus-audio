@@ -7,7 +7,11 @@ and live-stream implementation as the working audio baseline. It does not yet
 implement the proposed authoritative synchronized playback contract and does
 not intentionally change runtime behavior from `v1.4.7`.
 
-`v2.0.1` adds a session-scoped playback lifecycle timeline for observation and
+`v2.1.0` carries rendered authenticated/public asset URLs in the authoritative
+timeline as soon as MP3 rendering completes. Pi speaker playback remains on
+the fastest WAV-ready path and is never delayed for Companion.
+
+`v2.0.1` added a session-scoped playback lifecycle timeline for observation and
 measurement. Existing Pi, stream, and browser playback behavior is unchanged.
 
 > **Alpha Release disclaimer:** This software is Alpha Release and has not been tested in live environments and must not be relied upon for navigation or safety. The Authors do not accept any responsibility for loss or damage as a result of using this software.
@@ -58,7 +62,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.0.1 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.1.0 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 

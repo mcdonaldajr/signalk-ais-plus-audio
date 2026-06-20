@@ -915,8 +915,10 @@ module.exports = function aisPlusAudio(app) {
         audioFile: mp3FileName,
         renderedAt: new Date().toISOString(),
       };
+      Object.assign(entry, rendered);
       publishTimeline("audio-ready", rendered, {
         assetUrl: rendered.audioUrl,
+        publicAssetUrl: rendered.publicAudioUrl,
       });
       await fs.promises.writeFile(metadataFile, `${JSON.stringify(rendered, null, 2)}\n`);
       await cleanupGeneratedAudio();
@@ -2076,6 +2078,10 @@ module.exports = function aisPlusAudio(app) {
         subjectKey: String(entry.subjectKey || entry.vesselId || ""),
         priorityScore: Number(entry.priorityScore) || 0,
         message: String(entry.message || ""),
+        assetUrl: String(extra.assetUrl || entry.audioUrl || ""),
+        publicAssetUrl: String(
+          extra.publicAssetUrl || entry.publicAudioUrl || "",
+        ),
         occurredAt: new Date().toISOString(),
         ...extra,
       },
