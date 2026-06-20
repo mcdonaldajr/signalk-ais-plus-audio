@@ -496,6 +496,55 @@ module.exports = function aisPlusAudio(app) {
       });
     }));
 
+    router.post(`${prefix}/outputs`, write(async (req, res) => {
+      const next = {
+        muted:
+          req.body?.muted !== undefined
+            ? booleanFrom(req.body.muted)
+            : options.muted,
+        localPlayback:
+          req.body?.localPlayback !== undefined
+            ? booleanFrom(req.body.localPlayback)
+            : options.localPlayback,
+        liveStream:
+          req.body?.liveStream !== undefined
+            ? booleanFrom(req.body.liveStream)
+            : options.liveStream,
+      };
+      const previous = outputSettings();
+      options.muted = next.muted;
+      options.localPlayback = next.localPlayback;
+      options.liveStream = next.liveStream;
+      try {
+        await savePluginOptions({
+          ...storedPluginOptions,
+          muted: options.muted,
+          localPlayback: options.localPlayback,
+          liveStream: options.liveStream,
+        });
+      } catch (error) {
+        options.muted = previous.muted;
+        options.localPlayback = previous.localPlayback;
+        options.liveStream = previous.liveStream;
+        res.status(500).json({ error: `Output settings save failed: ${error.message}` });
+        return;
+      }
+      if (!options.liveStream) {
+        restartLiveStreamClients("radio stream disabled");
+      }
+      addRecent(
+        "settings",
+        [
+          `Audio outputs updated from webapp:`,
+          `mute ${options.muted ? "on" : "off"},`,
+          `Pi speaker ${options.localPlayback ? "on" : "off"},`,
+          `radio stream ${options.liveStream ? "on" : "off"}`,
+        ].join(" "),
+      );
+      publishStatus();
+      res.json({ ok: true, outputs: outputSettings(), status: buildStatus() });
+    }));
+
     router.post(`${prefix}/clear-queue`, write((_req, res) => {
       queue = [];
       addRecent("queue-cleared", "Announcement queue cleared");
@@ -599,6 +648,20 @@ module.exports = function aisPlusAudio(app) {
       ),
       debugLogging: value.debugLogging === true,
     };
+  }
+
+  function outputSettings() {
+    return {
+      muted: options.muted,
+      localPlayback: options.localPlayback,
+      liveStream: options.liveStream,
+    };
+  }
+
+  function booleanFrom(value) {
+    if (typeof value === "boolean") return value;
+    const text = String(value || "").trim().toLowerCase();
+    return text === "true" || text === "1" || text === "yes" || text === "on";
   }
 
   function subscribeToAisPlusAnnouncements() {

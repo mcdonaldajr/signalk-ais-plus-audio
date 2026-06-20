@@ -7,6 +7,7 @@ const ACCESS_REQUEST_URL = "/signalk/v1/access/requests";
 const ACCESS_TOKEN_STORAGE_KEY = "aisPlusAudio.accessToken";
 const ACCESS_REQUEST_STORAGE_KEY = "aisPlusAudio.accessRequestHref";
 const CLIENT_ID_STORAGE_KEY = "aisPlusAudio.clientId";
+const BROWSER_OUTPUT_STORAGE_KEY = "aisPlusAudio.browserOutput";
 const REQUEST_TIMEOUT_MS = 8000;
 const statusPill = document.getElementById("statusPill");
 const queueLength = document.getElementById("queueLength");
@@ -24,12 +25,19 @@ const streamUrl = document.getElementById("streamUrl");
 const streamDiagnostics = document.getElementById("streamDiagnostics");
 const events = document.getElementById("events");
 const checkPingEnabled = document.getElementById("checkPingEnabled");
+const checkBrowserOutput = document.getElementById("checkBrowserOutput");
+const checkPiOutput = document.getElementById("checkPiOutput");
+const checkStreamOutput = document.getElementById("checkStreamOutput");
+const checkMuteAll = document.getElementById("checkMuteAll");
+const outputStatus = document.getElementById("outputStatus");
 const aplayVolumeRange = document.getElementById("aplayVolumeRange");
 const aplayVolumeValue = document.getElementById("aplayVolumeValue");
 const aplayVolumeStatus = document.getElementById("aplayVolumeStatus");
 let accessToken = readStoredValue(ACCESS_TOKEN_STORAGE_KEY);
 let accessRequestTimer = null;
 let localNotice = null;
+let browserOutputEnabled = readStoredValue(BROWSER_OUTPUT_STORAGE_KEY) === "true";
+let lastBrowserAudioUrl = "";
 
 window.addEventListener("error", (event) => {
   renderStartupError(event.message || "AIS Plus Audio browser script failed");
@@ -59,6 +67,19 @@ checkPingEnabled.addEventListener("change", () => {
     renderCommandError,
   );
 });
+checkBrowserOutput.addEventListener("change", () => {
+  browserOutputEnabled = checkBrowserOutput.checked;
+  writeStoredValue(BROWSER_OUTPUT_STORAGE_KEY, browserOutputEnabled ? "true" : "false");
+  outputStatus.textContent = browserOutputEnabled
+    ? "Browser playback enabled for this device."
+    : "Browser playback disabled for this device.";
+  if (browserOutputEnabled && lastAudio.getAttribute("src")) {
+    playLastAudioInBrowser(true);
+  }
+});
+checkPiOutput.addEventListener("change", saveOutputRouting);
+checkStreamOutput.addEventListener("change", saveOutputRouting);
+checkMuteAll.addEventListener("change", saveOutputRouting);
 aplayVolumeRange.addEventListener("input", () => {
   renderAplayVolumeValue(aplayVolumeRange.value);
 });
@@ -130,6 +151,7 @@ function renderStatus(status) {
   streamConnectedTotal.textContent = streamStats.connectedTotal != null ? streamStats.connectedTotal : 0;
   streamDisconnectedTotal.textContent = streamStats.disconnectedTotal != null ? streamStats.disconnectedTotal : 0;
   checkPingEnabled.checked = status.pingEnabled !== false;
+  renderOutputRouting(status);
   renderAplayVolumeControl(status);
   audioDirectory.textContent = status.audioDirectory || "";
   streamUrl.textContent =
@@ -146,6 +168,7 @@ function renderStatus(status) {
       lastAudio.hidden = false;
       if (lastAudio.getAttribute("src") !== announcementAudioUrl) {
         lastAudio.setAttribute("src", announcementAudioUrl);
+        if (browserOutputEnabled) playLastAudioInBrowser(false);
       }
     } else {
       lastAudio.hidden = true;
@@ -159,6 +182,60 @@ function renderStatus(status) {
   }
 
   renderEvents(status.recentEvents || []);
+}
+
+async function saveOutputRouting() {
+  try {
+    outputStatus.textContent = "Saving output routing…";
+    await postJson("outputs", {
+      muted: checkMuteAll.checked,
+      localPlayback: checkPiOutput.checked,
+      liveStream: checkStreamOutput.checked,
+    });
+  } catch (error) {
+    renderCommandError(error);
+  }
+}
+
+function renderOutputRouting(status) {
+  checkBrowserOutput.checked = browserOutputEnabled;
+  if (document.activeElement !== checkPiOutput) {
+    checkPiOutput.checked = status.localPlayback !== false;
+  }
+  if (document.activeElement !== checkStreamOutput) {
+    checkStreamOutput.checked = status.liveStream !== false;
+  }
+  if (document.activeElement !== checkMuteAll) {
+    checkMuteAll.checked = status.pluginMuted === true;
+  }
+  const mutedReasons = [];
+  if (status.pluginMuted) mutedReasons.push("Audio muted here");
+  if (status.engineMuted) mutedReasons.push("muted by Traffic Core");
+  if (status.aisPlusMuted) mutedReasons.push("muted by AIS Plus");
+  outputStatus.textContent = [
+    `Browser ${browserOutputEnabled ? "on" : "off"}`,
+    `Pi speaker ${status.localPlayback !== false ? "on" : "off"}`,
+    `radio stream ${status.liveStream !== false ? "on" : "off"}`,
+    mutedReasons.length ? mutedReasons.join(", ") : "not muted",
+  ].join(" · ");
+}
+
+function playLastAudioInBrowser(userInitiated) {
+  const audioUrl = lastAudio.getAttribute("src") || "";
+  if (!audioUrl || (!userInitiated && audioUrl === lastBrowserAudioUrl)) return;
+  lastBrowserAudioUrl = audioUrl;
+  lastAudio
+    .play()
+    .then(() => {
+      outputStatus.textContent = userInitiated
+        ? "Browser playback enabled and last announcement played."
+        : "Browser announcement playback started.";
+    })
+    .catch((error) => {
+      lastBrowserAudioUrl = "";
+      outputStatus.textContent =
+        `Browser playback needs a tap here first: ${error.message || error}`;
+    });
 }
 
 function renderAplayVolumeControl(status) {

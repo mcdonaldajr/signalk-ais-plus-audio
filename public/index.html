@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AIS Plus Audio</title>
-    <link rel="stylesheet" href="/signalk-ais-plus-audio/styles.css?v=2.1.0" />
+    <link rel="stylesheet" href="/signalk-ais-plus-audio/styles.css?v=2.3.0" />
   </head>
   <body>
     <main>
@@ -29,6 +29,31 @@
           <input id="checkPingEnabled" type="checkbox" />
           <span>Enable directional ping</span>
         </label>
+        <div class="output-routing">
+          <h3>Output routing</h3>
+          <p class="muted">
+            Choose where rendered AIS Plus Audio announcements are allowed to play.
+            Browser playback is local to this browser; Pi speaker and radio stream
+            are saved on the Signal K server.
+          </p>
+          <label class="toggle-row">
+            <input id="checkBrowserOutput" type="checkbox" />
+            <span>Browser playback on this device</span>
+          </label>
+          <label class="toggle-row">
+            <input id="checkPiOutput" type="checkbox" />
+            <span>Pi speaker output</span>
+          </label>
+          <label class="toggle-row">
+            <input id="checkStreamOutput" type="checkbox" />
+            <span>Radio stream output</span>
+          </label>
+          <label class="toggle-row">
+            <input id="checkMuteAll" type="checkbox" />
+            <span>Mute all AIS Plus Audio outputs</span>
+          </label>
+          <p class="muted" id="outputStatus">Output routing waiting for Audio status.</p>
+        </div>
         <div class="slider-control">
           <label for="aplayVolumeRange">
             <span>Local speaker level</span>
@@ -119,6 +144,6 @@
         }
       }, 3000);
     </script>
-    <script src="/signalk-ais-plus-audio/app.js?v=2.1.0"></script>
+    <script src="/signalk-ais-plus-audio/app.js?v=2.3.0"></script>
   </body>
 </html>

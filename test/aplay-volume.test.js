@@ -268,7 +268,35 @@ async function postVolume(harness, volume) {
   return body;
 }
 
+async function postOutputs(harness, body) {
+  let responseBody;
+  await harness.posts.get("/outputs")(
+    { body },
+    {
+      statusCode: 200,
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(value) {
+        responseBody = { statusCode: this.statusCode, ...value };
+      },
+    },
+  );
+  return responseBody;
+}
+
 (async () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  const browserApp = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  assert.match(html, /Output routing/);
+  assert.match(html, /checkBrowserOutput/);
+  assert.match(html, /checkPiOutput/);
+  assert.match(html, /checkStreamOutput/);
+  assert.match(html, /checkMuteAll/);
+  assert.match(browserApp, /BROWSER_OUTPUT_STORAGE_KEY/);
+  assert.match(browserApp, /postJson\("outputs"/);
+
   const defaults = createHarness();
   assert.deepEqual(
     {
@@ -307,6 +335,30 @@ async function postVolume(harness, volume) {
   assert.equal(routeMaximum.savedOptions.at(-1).aplayVolumeLevelPercent, 100);
   assert.equal(routeMaximum.savedOptions.at(-1).aplayVolumePercent, 100);
   routeMaximum.plugin.stop();
+
+  const outputRouting = createHarness({
+    muted: false,
+    localPlayback: true,
+    liveStream: true,
+  });
+  const outputBody = await postOutputs(outputRouting, {
+    muted: true,
+    localPlayback: false,
+    liveStream: false,
+  });
+  assert.equal(outputBody.statusCode, 200);
+  assert.deepEqual(outputBody.outputs, {
+    muted: true,
+    localPlayback: false,
+    liveStream: false,
+  });
+  assert.equal(statusOf(outputRouting).pluginMuted, true);
+  assert.equal(statusOf(outputRouting).localPlayback, false);
+  assert.equal(statusOf(outputRouting).liveStream, false);
+  assert.equal(outputRouting.savedOptions.at(-1).muted, true);
+  assert.equal(outputRouting.savedOptions.at(-1).localPlayback, false);
+  assert.equal(outputRouting.savedOptions.at(-1).liveStream, false);
+  outputRouting.plugin.stop();
 
   const darwinDefault = withPlatform("darwin", () =>
     createHarness({}, { disableMixer: false }),
