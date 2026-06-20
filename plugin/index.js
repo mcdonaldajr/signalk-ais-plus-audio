@@ -21,6 +21,7 @@ const DEFAULT_APLAY_VOLUME_CONTROL = "PCM";
 const DEFAULT_APLAY_VOLUME_COMMAND = "amixer";
 const APLAY_VOLUME_FALLBACK_CONTROLS = ["PCM", "Master", "Headphone", "Speaker"];
 const NOTIFICATIONS_PLUS_PATH = "plugins.notificationsPlus";
+const ENGINE_AUDIO_POLICY_PATH = "plugins.aisPlusEngine.audioPolicy";
 
 module.exports = function aisPlusAudio(app) {
   const plugin = {};
@@ -35,6 +36,10 @@ module.exports = function aisPlusAudio(app) {
   let currentLocalPlaybackEntry = null;
   let lastAnnouncement = null;
   let aisPlusMuted = false;
+  let engineMuted = false;
+  let engineAudioPolicy = null;
+  let engineSessionId = "";
+  let lastEngineAudioPolicySequence = 0;
   let notificationsPlusSessionId = "";
   let lastNotificationsPlusAudioSequence = 0;
   let audioSessionId = randomUUID();
@@ -88,6 +93,10 @@ module.exports = function aisPlusAudio(app) {
     timeline = null;
     notificationsPlusSessionId = "";
     lastNotificationsPlusAudioSequence = 0;
+    engineMuted = false;
+    engineAudioPolicy = null;
+    engineSessionId = "";
+    lastEngineAudioPolicySequence = 0;
     options = normalizeOptions(initialPluginOptions);
     storedPluginOptions = {
       ...initialPluginOptions,
@@ -124,6 +133,8 @@ module.exports = function aisPlusAudio(app) {
     currentLocalPlaybackEntry = null;
     activeNotificationSubjects = new Set();
     aisPlusMuted = false;
+    engineMuted = false;
+    engineAudioPolicy = null;
     stopLiveStreamSilence();
     for (const client of Array.from(liveStreamClients)) {
       closeLiveStreamClient(client, "plugin stop");
@@ -600,6 +611,7 @@ module.exports = function aisPlusAudio(app) {
       context: "vessels.self",
       subscribe: [
         { path: NOTIFICATIONS_PLUS_PATH, policy: "instant", format: "delta" },
+        { path: ENGINE_AUDIO_POLICY_PATH, policy: "instant", format: "delta" },
       ],
     };
 
@@ -617,9 +629,35 @@ module.exports = function aisPlusAudio(app) {
   function handleDelta(delta) {
     for (const update of delta.updates || []) {
       for (const value of update.values || []) {
-        handleNotificationValue(value);
+        if (value?.path === ENGINE_AUDIO_POLICY_PATH) {
+          handleEngineAudioPolicy(value.value);
+        } else {
+          handleNotificationValue(value);
+        }
       }
     }
+  }
+
+  function handleEngineAudioPolicy(projection) {
+    if (projection?.contract !== "ais-plus-engine-audio-policy") return;
+    const sessionId = String(projection.sessionId || "");
+    if (sessionId && sessionId !== engineSessionId) {
+      engineSessionId = sessionId;
+      lastEngineAudioPolicySequence = 0;
+    }
+    const sequence = Number(projection.sequence) || 0;
+    if (sequence <= lastEngineAudioPolicySequence) return;
+    lastEngineAudioPolicySequence = sequence;
+    engineAudioPolicy = projection;
+    const wasMuted = engineMuted;
+    engineMuted =
+      projection.authoritative === true &&
+      projection.mode === "engine" &&
+      projection.muted === true;
+    if (!wasMuted && engineMuted) {
+      clearQueuedAnnouncements("Engine audio policy muted audio");
+    }
+    publishStatus();
   }
 
   function handleNotificationValue(value) {
@@ -1149,7 +1187,7 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function isAudioMuted() {
-    return options.muted === true || aisPlusMuted === true;
+    return options.muted === true || aisPlusMuted === true || engineMuted === true;
   }
 
   function isAudioMutedForEntry(entry) {
@@ -1177,6 +1215,10 @@ module.exports = function aisPlusAudio(app) {
       enabled: options.enabled,
       muted: isAudioMuted(),
       pluginMuted: options.muted,
+      engineMuted,
+      engineAudioPolicy,
+      engineSessionId,
+      engineAudioPolicySequence: lastEngineAudioPolicySequence,
       aisPlusMuted,
       localPlayback: options.localPlayback,
       liveStream: options.liveStream,

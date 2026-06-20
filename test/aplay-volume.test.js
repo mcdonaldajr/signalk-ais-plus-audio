@@ -159,6 +159,35 @@ function soundStateNotification(muted) {
   };
 }
 
+function sendEngineAudioPolicy(harness, {
+  muted,
+  sequence,
+  sessionId = "engine-session",
+  correlationId = "engine-policy",
+} = {}) {
+  harness.subscriptionCallbacks[0]({
+    updates: [
+      {
+        values: [
+          {
+            path: "plugins.aisPlusEngine.audioPolicy",
+            value: {
+              contract: "ais-plus-engine-audio-policy",
+              contractVersion: 1,
+              sessionId,
+              sequence,
+              correlationId,
+              mode: "engine",
+              authoritative: true,
+              muted,
+            },
+          },
+        ],
+      },
+    ],
+  });
+}
+
 function createSlowRenderHarness() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ais-plus-audio-test-"));
   const voicesDir = path.join(tempDir, "voices");
@@ -525,6 +554,27 @@ async function postVolume(harness, volume) {
   await new Promise((resolve) => setTimeout(resolve, 1100));
   queuedMute.plugin.stop();
   fs.rmSync(queuedMute.tempDir, { recursive: true, force: true });
+
+  const engineMute = createHarness();
+  sendEngineAudioPolicy(engineMute, { muted: true, sequence: 1 });
+  assert.equal(statusOf(engineMute).engineMuted, true);
+  assert.equal(statusOf(engineMute).muted, true);
+  sendNotification(
+    engineMute,
+    "notifications.collision.engine-muted",
+    vesselNotification("engine-muted", "This must remain silent."),
+  );
+  assert.equal(statusOf(engineMute).queueLength, 0);
+  sendEngineAudioPolicy(engineMute, { muted: false, sequence: 2 });
+  assert.equal(statusOf(engineMute).engineMuted, false);
+  assert.equal(statusOf(engineMute).muted, false);
+  sendEngineAudioPolicy(engineMute, { muted: true, sequence: 1 });
+  assert.equal(
+    statusOf(engineMute).engineMuted,
+    false,
+    "non-monotonic Engine Audio Policy sequence is ignored",
+  );
+  engineMute.plugin.stop();
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
