@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const { randomUUID } = require("node:crypto");
 const http = require("node:http");
 const https = require("node:https");
 const os = require("node:os");
@@ -34,7 +35,12 @@ module.exports = function aisPlusAudio(app) {
   let currentLocalPlaybackEntry = null;
   let lastAnnouncement = null;
   let aisPlusMuted = false;
+  let notificationsPlusSessionId = "";
   let lastNotificationsPlusAudioSequence = 0;
+  let audioSessionId = randomUUID();
+  let audioTimelineSequence = 0;
+  let audioPlaybackSequence = 0;
+  let timeline = null;
   let activeNotificationSubjects = new Set();
   let lastAplayVolumeSetAt = null;
   let lastAplayVolumeError = "";
@@ -76,6 +82,12 @@ module.exports = function aisPlusAudio(app) {
     "Renders AIS Plus announcement events into Piper audio for local speaker and browser clients.";
 
   plugin.start = (initialPluginOptions = {}) => {
+    audioSessionId = randomUUID();
+    audioTimelineSequence = 0;
+    audioPlaybackSequence = 0;
+    timeline = null;
+    notificationsPlusSessionId = "";
+    lastNotificationsPlusAudioSequence = 0;
     options = normalizeOptions(initialPluginOptions);
     storedPluginOptions = {
       ...initialPluginOptions,
@@ -613,6 +625,11 @@ module.exports = function aisPlusAudio(app) {
   function handleNotificationValue(value) {
     if (value?.path !== NOTIFICATIONS_PLUS_PATH) return;
     const projection = value.value;
+    const brokerSessionId = String(projection?.sessionId || "");
+    if (brokerSessionId && brokerSessionId !== notificationsPlusSessionId) {
+      notificationsPlusSessionId = brokerSessionId;
+      lastNotificationsPlusAudioSequence = 0;
+    }
     activeNotificationSubjects = new Set(
       Array.isArray(projection?.active)
         ? projection.active
@@ -625,10 +642,10 @@ module.exports = function aisPlusAudio(app) {
     if (!envelope || sequence <= lastNotificationsPlusAudioSequence) return;
     lastNotificationsPlusAudioSequence = sequence;
     stats.received += 1;
-    handleNotificationsPlusAudio(envelope);
+    handleNotificationsPlusAudio(envelope, projection?.audioRequest);
   }
 
-  function handleNotificationsPlusAudio(envelope) {
+  function handleNotificationsPlusAudio(envelope, request = null) {
     const receivedAt = new Date().toISOString();
     const muteState = envelope?.delivery?.muteState;
     if (muteState === true) {
@@ -647,26 +664,29 @@ module.exports = function aisPlusAudio(app) {
       stats.filtered += 1;
       return;
     }
-    enqueue(
-      normalizeAnnouncement({
-        id: envelope.eventId,
-        ts: envelope.timestamp,
-        receivedAt,
-        lifecycle: envelope.lifecycle,
-        expiresAt: envelope.audioExpiresAt || envelope.expiresAt || null,
-        vesselId: envelope.subjectKey || "",
-        mmsi: envelope.context?.mmsi || "",
-        vesselName: envelope.presentation?.title || "",
-        severity: envelope.priority?.level || "information",
-        priorityScore: Number(envelope.priority?.score) || 0,
-        preempt: envelope.delivery?.preempt !== false,
-        category: envelope.presentation?.category || "notification",
-        message,
-        sourcePath: NOTIFICATIONS_PLUS_PATH,
-        localPlayback: envelope.delivery?.localPlayback !== false,
-        streamOutput: envelope.delivery?.streamOutput !== false,
-      }),
-    );
+    const entry = normalizeAnnouncement({
+      id: envelope.eventId,
+      requestId: request?.requestId,
+      correlationId: request?.correlationId || envelope.correlationId,
+      subjectKey: request?.subjectKey || envelope.subjectKey,
+      ts: envelope.timestamp,
+      receivedAt,
+      lifecycle: envelope.lifecycle,
+      expiresAt: envelope.audioExpiresAt || envelope.expiresAt || null,
+      vesselId: envelope.subjectKey || "",
+      mmsi: envelope.context?.mmsi || "",
+      vesselName: envelope.presentation?.title || "",
+      severity: envelope.priority?.level || "information",
+      priorityScore: Number(envelope.priority?.score) || 0,
+      preempt: envelope.delivery?.preempt !== false,
+      category: envelope.presentation?.category || "notification",
+      message,
+      sourcePath: NOTIFICATIONS_PLUS_PATH,
+      localPlayback: envelope.delivery?.localPlayback !== false,
+      streamOutput: envelope.delivery?.streamOutput !== false,
+    });
+    publishTimeline("accepted", entry);
+    enqueue(entry);
   }
 
   function enqueue(entry) {
@@ -735,6 +755,7 @@ module.exports = function aisPlusAudio(app) {
       addRecent("warning", "Dropped stale queued announcements");
     }
     stats.queued += 1;
+    publishTimeline("queued", entry);
     addRecent(
       "queued",
       `[priority ${entry.priorityScore}] ${entry.message} (${timingAgeText(entry.timestamp, entry.queuedAt)} from provider)`,
@@ -767,6 +788,7 @@ module.exports = function aisPlusAudio(app) {
     entry.generatedToProcessingMs = elapsedMs(entry.timestamp, entry.processingStartedAt);
     if (announcementExpired(entry)) {
       stats.filtered += 1;
+      publishTimeline("expired", entry);
       addRecent(
         "expired",
         `Dropped expired announcement after ${formatDurationMs(entry.generatedToProcessingMs)}: ${entry.message}`,
@@ -819,6 +841,7 @@ module.exports = function aisPlusAudio(app) {
     const metadataFile = path.join(audioDir, `${baseName}.json`);
 
     entry.synthesisStartedAt = new Date().toISOString();
+    publishTimeline("synthesis-started", entry);
     await synthesizePiperWav(formatMessageForSpeech(entry.message), speechWav);
     entry.synthesisCompletedAt = new Date().toISOString();
     entry.synthesisMs = elapsedMs(entry.synthesisStartedAt, entry.synthesisCompletedAt);
@@ -892,6 +915,9 @@ module.exports = function aisPlusAudio(app) {
         audioFile: mp3FileName,
         renderedAt: new Date().toISOString(),
       };
+      publishTimeline("audio-ready", rendered, {
+        assetUrl: rendered.audioUrl,
+      });
       await fs.promises.writeFile(metadataFile, `${JSON.stringify(rendered, null, 2)}\n`);
       await cleanupGeneratedAudio();
       if (entry.streamOutput !== false && !isAudioMutedForEntry(entry)) {
@@ -918,6 +944,9 @@ module.exports = function aisPlusAudio(app) {
       return rendered;
     } catch (error) {
       if (entry.preemptedBy) {
+        publishTimeline("interrupted", entry, {
+          preemptedPlaybackId: entry.preemptedBy.playbackId || null,
+        });
         addRecent(
           "preempted",
           `${entry.message} interrupted by higher-priority ${entry.preemptedBy.message}`,
@@ -925,6 +954,7 @@ module.exports = function aisPlusAudio(app) {
         requeueInterruptedAnnouncement(entry);
       } else {
         stats.failed += 1;
+        publishTimeline("failed", entry, { error: error.message });
         addRecent("error", `Render failed: ${error.message}`);
         app.error(`[${PLUGIN_ID}] render failed: ${error.stack || error.message}`);
       }
@@ -959,6 +989,7 @@ module.exports = function aisPlusAudio(app) {
     }
     active.preemptedBy = {
       id: prepared.entry.id,
+      playbackId: prepared.entry.playbackId,
       message: prepared.entry.message,
       priorityScore: prepared.entry.priorityScore,
     };
@@ -1010,6 +1041,7 @@ module.exports = function aisPlusAudio(app) {
     const replay = requeuePreparedEntry({
       ...entry,
       id: `${entry.id}-resume-${Date.now()}`,
+      playbackId: nextPlaybackId(),
       preemptedBy: null,
       blockedBy: null,
       localPlaybackStartedAt: null,
@@ -1022,6 +1054,7 @@ module.exports = function aisPlusAudio(app) {
       resumeAfterPreemption: true,
     });
     queue.push(replay);
+    publishTimeline("resumed", replay);
     sortAnnouncementQueue();
     addRecent(
       "preempted-requeued",
@@ -1053,6 +1086,10 @@ module.exports = function aisPlusAudio(app) {
       new Date(Date.parse(ts) + options.generatedAudioExpiresSeconds * 1000).toISOString();
     return {
       id: String(value.id || `announcement-${Date.now()}`),
+      requestId: String(value.requestId || value.id || `request-${Date.now()}`),
+      playbackId: String(value.playbackId || nextPlaybackId()),
+      correlationId: String(value.correlationId || ""),
+      subjectKey: String(value.subjectKey || value.vesselId || ""),
       timestamp: ts,
       expiresAt,
       lifecycle: String(value.lifecycle || "event"),
@@ -1130,6 +1167,10 @@ module.exports = function aisPlusAudio(app) {
     return {
       plugin: PLUGIN_ID,
       version: packageInfo.version,
+      contract: "ais-plus-audio-status",
+      contractVersion: 1,
+      sessionId: audioSessionId,
+      timeline,
       serverTime: new Date().toISOString(),
       enabled: options.enabled,
       muted: isAudioMuted(),
@@ -1670,6 +1711,9 @@ module.exports = function aisPlusAudio(app) {
         "speaker-started",
         `[priority ${entry.priorityScore}] ${entry.message} (provider-to-speaker ${formatDurationMs(entry.generatedToSpeakerMs)}, queued-to-speaker ${formatDurationMs(entry.queueToSpeakerMs)}, synthesis ${formatDurationMs(entry.synthesisMs)}, ready wait ${formatDurationMs(entry.preparedToSpeakerMs)}${blocker})`,
       );
+      publishTimeline("speaker-started", entry, {
+        speakerStartedAt: startedAt,
+      });
     }
     currentLocalPlaybackEntry = entry;
     try {
@@ -1687,6 +1731,11 @@ module.exports = function aisPlusAudio(app) {
         entry.localPlaybackStartedAt,
         entry.localPlaybackCompletedAt,
       );
+      publishTimeline("speaker-finished", entry, {
+        speakerStartedAt: entry.localPlaybackStartedAt,
+        speakerFinishedAt: entry.localPlaybackCompletedAt,
+        durationMs: entry.localPlaybackMs,
+      });
     }
     if (options.speakerReleaseGapMs > 0) {
       await delay(options.speakerReleaseGapMs);
@@ -2005,6 +2054,33 @@ module.exports = function aisPlusAudio(app) {
 
   function ensureAudioDirectory() {
     fs.mkdirSync(expandHome(options.audioDirectory), { recursive: true });
+  }
+
+  function nextPlaybackId() {
+    audioPlaybackSequence += 1;
+    return `${audioSessionId}:${audioPlaybackSequence}`;
+  }
+
+  function publishTimeline(state, entry = {}, extra = {}) {
+    audioTimelineSequence += 1;
+    timeline = {
+      contract: "ais-plus-audio-timeline",
+      contractVersion: 1,
+      sessionId: audioSessionId,
+      sequence: audioTimelineSequence,
+      event: {
+        state,
+        playbackId: String(entry.playbackId || ""),
+        requestId: String(entry.requestId || ""),
+        correlationId: String(entry.correlationId || ""),
+        subjectKey: String(entry.subjectKey || entry.vesselId || ""),
+        priorityScore: Number(entry.priorityScore) || 0,
+        message: String(entry.message || ""),
+        occurredAt: new Date().toISOString(),
+        ...extra,
+      },
+    };
+    publishStatus();
   }
 
   function addRecent(event, message) {
