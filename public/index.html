@@ -4,14 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Watchkeeper Audio</title>
-    <link rel="stylesheet" href="/signalk-ais-plus-audio/styles.css?v=2.3.0" />
+    <link rel="stylesheet" href="/signalk-ais-plus-audio/styles.css?v=2.3.3" />
   </head>
   <body>
     <main>
       <header>
         <div>
           <p class="eyebrow">Watchkeeper Audio</p>
-          <h1>Piper audio bridge</h1>
+          <h1>Announcement audio</h1>
         </div>
         <div class="status-pill" id="statusPill">Loading</div>
       </header>
@@ -101,7 +101,7 @@
       <section class="panel">
         <h2>Radio stream</h2>
         <p class="muted">
-          Use the local stream URL in a radio player app to keep AIS Plus Audio
+          Use the local stream URL in a radio player app to keep Watchkeeper Audio
           playing while a phone or tablet is locked.
         </p>
         <p class="path" id="streamUrl"></p>
@@ -139,11 +139,11 @@
           pill.className = "status-pill bad";
           if (events) {
             events.className = "events";
-            events.textContent = "AIS Plus Audio page script did not start. Hard refresh this page, then check that JavaScript is allowed for this Signal K site.";
+            events.textContent = "Watchkeeper Audio page script did not start. Hard refresh this page, then check that JavaScript is allowed for this Signal K site.";
           }
         }
       }, 3000);
     </script>
-    <script src="/signalk-ais-plus-audio/app.js?v=2.3.0"></script>
+    <script src="/signalk-ais-plus-audio/app.js?v=2.3.3"></script>
   </body>
 </html>

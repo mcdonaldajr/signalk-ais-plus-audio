@@ -223,7 +223,7 @@ module.exports = function aisPlusAudio(app) {
         type: "number",
         title: "Local speaker level (%)",
         description:
-          "Logarithmic default speaker level to apply at AIS Plus Audio startup and before local aplay playback. Level 0 applies 66% to the ALSA mixer, so the local speaker should remain audible.",
+          "Logarithmic default speaker level to apply at Watchkeeper Audio startup and before local aplay playback. Level 0 applies 66% to the ALSA mixer, so the local speaker should remain audible.",
         default: DEFAULT_APLAY_VOLUME_LEVEL_PERCENT,
         minimum: MIN_APLAY_VOLUME_LEVEL_PERCENT,
         maximum: MAX_APLAY_VOLUME_LEVEL_PERCENT,
@@ -239,7 +239,7 @@ module.exports = function aisPlusAudio(app) {
         type: "string",
         title: "Local speaker mixer control",
         description:
-          "Usually PCM on Raspberry Pi OS. AIS Plus Audio will also try Master, Headphone, and Speaker if the configured control is not present.",
+          "Usually PCM on Raspberry Pi OS. Watchkeeper Audio will also try Master, Headphone, and Speaker if the configured control is not present.",
         default: DEFAULT_APLAY_VOLUME_CONTROL,
       },
       voicesDir: {
@@ -285,7 +285,7 @@ module.exports = function aisPlusAudio(app) {
         type: "integer",
         title: "Maximum stream lag before reconnect (seconds)",
         description:
-          "If a radio player falls this far behind, AIS Plus Audio closes that stream instead of queuing stale announcements behind old silence.",
+          "If a radio player falls this far behind, Watchkeeper Audio closes that stream instead of queuing stale announcements behind old silence.",
         default: 30,
         minimum: 5,
         maximum: 300,
@@ -410,7 +410,7 @@ module.exports = function aisPlusAudio(app) {
       const streamUrl = absolutePluginUrl(req, "/live.mp3");
       res.setHeader("Content-Type", "audio/x-mpegurl; charset=utf-8");
       res.setHeader("Cache-Control", "no-store");
-      res.send(`#EXTM3U\n#EXTINF:-1,AIS Plus Audio\n${streamUrl}\n`);
+      res.send(`#EXTM3U\n#EXTINF:-1,Watchkeeper Audio\n${streamUrl}\n`);
     });
 
     router.get(`${prefix}/audio/:file`, (req, res) => {
@@ -435,7 +435,7 @@ module.exports = function aisPlusAudio(app) {
         ts: new Date().toISOString(),
         severity: "alert",
         category: "test",
-        vesselName: "AIS Plus Audio",
+        vesselName: "Watchkeeper Audio",
         clock: 12,
         sizeCategory: "medium",
         message: "Sound Check. Testing 1, 2, 3.",
@@ -589,7 +589,7 @@ module.exports = function aisPlusAudio(app) {
       res.status(403).json({
         ok: false,
         error:
-          "AIS Plus Audio controls require Signal K read/write or admin access.",
+          "Watchkeeper Audio controls require Signal K read/write or admin access.",
       });
       return undefined;
     };
@@ -1439,7 +1439,7 @@ module.exports = function aisPlusAudio(app) {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
-    res.setHeader("icy-name", "AIS Plus Audio");
+    res.setHeader("icy-name", "Watchkeeper Audio");
     res.setHeader("icy-genre", "Marine Safety");
     res.setHeader("icy-br", String(options.mp3BitrateKbps));
     res.setHeader("icy-pub", "0");
@@ -1499,7 +1499,7 @@ module.exports = function aisPlusAudio(app) {
         sendPlainResponse(
           res,
           200,
-          `#EXTM3U\n#EXTINF:-1,AIS Plus Audio\n${publicStreamProtocol()}://${host}/live.mp3\n`,
+          `#EXTM3U\n#EXTINF:-1,Watchkeeper Audio\n${publicStreamProtocol()}://${host}/live.mp3\n`,
           "audio/x-mpegurl; charset=utf-8",
         );
         return;
@@ -1777,8 +1777,8 @@ module.exports = function aisPlusAudio(app) {
       ts: now.toISOString(),
       severity: "alert",
       category: "stream-health",
-      vesselName: "AIS Plus Audio",
-      message: `AIS Plus Audio time check. Server time is ${time}.`,
+      vesselName: "Watchkeeper Audio",
+      message: `Watchkeeper Audio time check. Server time is ${time}.`,
       force,
       streamOnly: true,
     });

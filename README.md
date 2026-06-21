@@ -2,6 +2,9 @@
 
 ## Version 2 baseline
 
+`v2.3.3` completes the public webapp naming pass: visible labels now say
+Watchkeeper Audio, and the main page no longer presents Piper as the app name.
+
 `v2.0.0` promotes the current Notifications Plus renderer, Pi speaker pipeline,
 and live-stream implementation as the working audio baseline. It does not yet
 implement the proposed authoritative synchronized playback contract and does
@@ -19,7 +22,7 @@ non-monotonic policy updates are ignored.
 
 `v2.3.1` suppresses repeated no-op provider-mute queue-clear events, so the Audio recent-event log no longer fills with "Provider muted audio: queue already empty" while already muted.
 
-`v2.3.0` restores output routing controls in the AIS Plus Audio webapp. Browser
+`v2.3.0` restores output routing controls in the Watchkeeper Audio webapp. Browser
 playback is a local per-device setting, while Pi speaker output, radio stream
 output, and mute-all are saved on the Signal K server as Audio-owned settings.
 
@@ -66,7 +69,7 @@ Version `1.4.6` closes a preparation race: when a higher-priority event arrives 
 
 Version `1.4.7` keeps the local speaker reserved for 500 ms after `aplay` exits. This protects the final buffered words before the next queued announcement starts. The gap is configurable in the plugin settings.
 
-Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. The local speaker level setting uses a logarithmic curve and applies the matching ALSA mixer volume at AIS Plus Audio startup and before local `aplay` playback. Level `0%` maps to `66%` on the mixer, level `100%` maps to `100%`, and old linear mixer-volume settings are migrated onto the new curve. It tries the configured mixer control first, then common Pi/ALSA controls such as `PCM`, `Master`, `Headphone`, and `Speaker`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
+Volume settings are shown as percentages in the Signal K configuration page. Existing pre-`0.2.2` gain settings are migrated automatically, so an old value of `1` becomes `100%`. The local speaker level setting uses a logarithmic curve and applies the matching ALSA mixer volume at Watchkeeper Audio startup and before local `aplay` playback. Level `0%` maps to `66%` on the mixer, level `100%` maps to `100%`, and old linear mixer-volume settings are migrated onto the new curve. It tries the configured mixer control first, then common Pi/ALSA controls such as `PCM`, `Master`, `Headphone`, and `Speaker`. Paths beginning with `~` are expanded for Piper, FFmpeg, audio player, voice, and generated-audio paths.
 
 The radio stream is intended for iPhone/iPad/Android apps that can keep a stream alive while the device is locked.
 
@@ -80,7 +83,7 @@ sudo systemctl restart signalk
 
 Open **Watchkeeper Audio** from the Signal K webapps page.
 
-The **Enable directional ping** checkbox in the AIS Plus Audio webapp can switch the ping on or off immediately while Signal K is running. The **Local speaker level** slider sets and saves the logarithmic default level for local `aplay` output, with its minimum mapped to `66%` mixer volume. The Signal K plugin configuration still provides the startup defaults and ping volume/frequency settings.
+The **Enable directional ping** checkbox in the Watchkeeper Audio webapp can switch the ping on or off immediately while Signal K is running. The **Local speaker level** slider sets and saves the logarithmic default level for local `aplay` output, with its minimum mapped to `66%` mixer volume. The Signal K plugin configuration still provides the startup defaults and ping volume/frequency settings.
 
 ## Radio Stream
 
@@ -95,7 +98,7 @@ https://nemo3.local:3445/live.mp3
 Station name:
 
 ```text
-AIS Plus Audio
+Watchkeeper Audio
 ```
 
 Some apps prefer an M3U playlist:
@@ -110,9 +113,9 @@ The local stream port serves only the generated audio stream, so native radio pl
 
 1. Install a radio stream player app.
 2. Add a custom station using `https://nemo3.local:3445/live.mp3`.
-3. Name it `AIS Plus Audio`.
+3. Name it `Watchkeeper Audio`.
 4. Start the station while connected to the boat Wi-Fi.
-5. Trigger **Sound check** in the AIS Plus Audio webapp.
+5. Trigger **Sound check** in the Watchkeeper Audio webapp.
 6. Lock the phone and trigger another **Sound check** to confirm background playback.
 
 If the app asks for a playlist rather than a direct stream, use `https://nemo3.local:3445/live.m3u`.
@@ -133,11 +136,11 @@ The bitrate is configurable in the Signal K plugin settings as **MP3 stream bitr
 
 ### Stream Lag Guard
 
-AIS Plus Audio treats the radio stream as live audio, not as a podcast queue. If a player falls too far behind, the server closes that stream instead of writing a fresh announcement behind old buffered silence. The player should then reconnect and resume from the current live stream.
+Watchkeeper Audio treats the radio stream as live audio, not as a podcast queue. If a player falls too far behind, the server closes that stream instead of writing a fresh announcement behind old buffered silence. The player should then reconnect and resume from the current live stream.
 
 The lag limit is configurable as **Maximum stream lag before reconnect (seconds)** and defaults to 30 seconds.
 
-Use **Restart streams** in the AIS Plus Audio webapp to test whether a radio app reconnects automatically after the stream is deliberately closed. If it does not reconnect, start the station manually again in the radio app.
+Use **Restart streams** in the Watchkeeper Audio webapp to test whether a radio app reconnects automatically after the stream is deliberately closed. If it does not reconnect, start the station manually again in the radio app.
 
 ### Stream Time Check
 
@@ -147,7 +150,7 @@ The interval is configurable as **Live stream time-check interval (minutes)**. T
 
 ### Stream Diagnostics
 
-The AIS Plus Audio webapp shows current stream clients, total connects/disconnects, client uptime, server-side write buffer size, and the last disconnect reason. The stream also sends basic ICY radio headers (`icy-name`, `icy-genre`, `icy-br`) so native radio players can recognise it as a radio-style stream.
+The Watchkeeper Audio webapp shows current stream clients, total connects/disconnects, client uptime, server-side write buffer size, and the last disconnect reason. The stream also sends basic ICY radio headers (`icy-name`, `icy-genre`, `icy-br`) so native radio players can recognise it as a radio-style stream.
 
 This traffic should stay on the local boat LAN when the stream URL uses the local hostname `nemo3.local`. It should not use the boat router's cellular data unless the phone is no longer on the boat Wi-Fi, the hostname is being resolved through a remote/VPN route, or the router is configured to hairpin local traffic through an internet service.
 
@@ -157,13 +160,13 @@ For normal use, keep the phone on the boat Wi-Fi and use the local `.local` addr
 
 - Providers decide notification meaning and publish standard Signal K notifications.
 - Notifications Plus applies priority, lifecycle, supersession, history, and delivery mechanics.
-- AIS Plus Audio renders the broker's audio projection without classifying content.
+- Watchkeeper Audio renders the broker's audio projection without classifying content.
 - AIS Plus Companion can play the rendered audio while open.
 - A native radio player can play the live stream while the phone or tablet is locked.
 
 ## Queue Behaviour
 
-AIS Plus Audio keeps the current speaker announcement uninterrupted. When a new vessel announcement is queued, any older queued announcements for the same vessel are dropped before the new one is added. This keeps busy-area speech focused on the latest known state, including de-escalations from collision alarm back to advisory.
+Watchkeeper Audio keeps the current speaker announcement uninterrupted. When a new vessel announcement is queued, any older queued announcements for the same vessel are dropped before the new one is added. This keeps busy-area speech focused on the latest known state, including de-escalations from collision alarm back to advisory.
 
 When the authoritative provider or Engine Audio Policy is muted, AIS Plus
 Audio immediately clears its queued backlog and suppresses further non-forced

@@ -40,11 +40,11 @@ let browserOutputEnabled = readStoredValue(BROWSER_OUTPUT_STORAGE_KEY) === "true
 let lastBrowserAudioUrl = "";
 
 window.addEventListener("error", (event) => {
-  renderStartupError(event.message || "AIS Plus Audio browser script failed");
+  renderStartupError(event.message || "Watchkeeper Audio browser script failed");
 });
 window.addEventListener("unhandledrejection", (event) => {
   const reason = event.reason || {};
-  renderStartupError(reason.message || String(reason) || "AIS Plus Audio request failed");
+  renderStartupError(reason.message || String(reason) || "Watchkeeper Audio request failed");
 });
 
 document.getElementById("buttonSoundCheck").addEventListener("click", () => {
@@ -342,7 +342,7 @@ function escapeHtml(value) {
 
 function renderCommandError(error) {
   if (error.canRequestAccess) {
-    requestSignalKAccess(error.commandLabel || "AIS Plus Audio control");
+    requestSignalKAccess(error.commandLabel || "Watchkeeper Audio control");
     return;
   }
   localNotice = { event: "error", message: error.message, ts: new Date().toISOString() };
@@ -355,7 +355,7 @@ function renderStartupError(message) {
   renderEvents([
     {
       event: "error",
-      message: `AIS Plus Audio cannot update the page: ${message}`,
+      message: `Watchkeeper Audio cannot update the page: ${message}`,
       ts: new Date().toISOString(),
     },
   ]);
@@ -425,16 +425,16 @@ async function readLoginStatus() {
 function audioAccessMessage(status, body, text, loginStatus) {
   if (body && body.error) return body.error;
   if (loginStatus && loginStatus.authenticationRequired === false) {
-    return `Signal K refused AIS Plus Audio access: ${friendlyHttpError(status, text)}`;
+    return `Signal K refused Watchkeeper Audio access: ${friendlyHttpError(status, text)}`;
   }
   if (status === 403) {
-    return "AIS Plus Audio controls require Signal K read/write or admin access.";
+    return "Watchkeeper Audio controls require Signal K read/write or admin access.";
   }
   if (!loginStatus || loginStatus.status !== "loggedIn") {
-    return "AIS Plus Audio needs a Signal K login or approved device token.";
+    return "Watchkeeper Audio needs a Signal K login or approved device token.";
   }
   const userLevel = (loginStatus && loginStatus.userLevel) || "non-admin";
-  return `AIS Plus Audio controls require Signal K read/write or admin access. Current user level: ${userLevel}.`;
+  return `Watchkeeper Audio controls require Signal K read/write or admin access. Current user level: ${userLevel}.`;
 }
 
 function parseJson(text) {
@@ -447,7 +447,7 @@ function parseJson(text) {
 
 function friendlyHttpError(status, text) {
   if (status === 401 || status === 403) {
-    return "Signal K login required or this user is not allowed to control AIS Plus Audio.";
+    return "Signal K login required or this user is not allowed to control Watchkeeper Audio.";
   }
   const cleaned = String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   return cleaned || `HTTP ${status}`;
@@ -459,7 +459,7 @@ async function requestSignalKAccess(label) {
     pollAccessRequest(pendingHref);
     localNotice = {
       event: "access",
-      message: `${label} needs write access. Approve the pending AIS Plus Audio request in Signal K Access Requests.`,
+      message: `${label} needs write access. Approve the pending Watchkeeper Audio request in Signal K Access Requests.`,
       ts: new Date().toISOString(),
     };
     renderEvents([]);
@@ -472,7 +472,7 @@ async function requestSignalKAccess(label) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         clientId: getClientId(),
-        description: "AIS Plus Audio browser",
+        description: "Watchkeeper Audio browser",
         permissions: "readwrite",
       }),
     });
@@ -492,7 +492,7 @@ async function requestSignalKAccess(label) {
     }
     localNotice = {
       event: "access",
-      message: `${label} needs write access. Approve AIS Plus Audio in Signal K Access Requests, then try again.`,
+      message: `${label} needs write access. Approve Watchkeeper Audio in Signal K Access Requests, then try again.`,
       ts: new Date().toISOString(),
     };
     renderEvents([]);
@@ -533,7 +533,7 @@ function pollAccessRequest(href) {
         writeStoredValue(ACCESS_TOKEN_STORAGE_KEY, token);
         localNotice = {
           event: "access",
-          message: "AIS Plus Audio write access approved.",
+          message: "Watchkeeper Audio write access approved.",
           ts: new Date().toISOString(),
         };
         await refresh();
@@ -541,7 +541,7 @@ function pollAccessRequest(href) {
       }
       localNotice = {
         event: "access",
-        message: "AIS Plus Audio write access was not approved.",
+        message: "Watchkeeper Audio write access was not approved.",
         ts: new Date().toISOString(),
       };
       renderEvents([]);
