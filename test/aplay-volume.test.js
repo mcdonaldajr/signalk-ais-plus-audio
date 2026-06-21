@@ -590,6 +590,21 @@ async function postOutputs(harness, body) {
   assert.equal(statusOf(queuedMute).queueLength, 0);
   assert.equal(statusOf(queuedMute).aisPlusMuted, true);
   assert.equal(statusOf(queuedMute).muted, true);
+  const queueClearsAfterFirstMute = statusOf(queuedMute).recentEvents.filter(
+    (event) => event.event === "queue-cleared",
+  );
+  assert.equal(queueClearsAfterFirstMute.length, 1);
+  assert.doesNotMatch(queueClearsAfterFirstMute[0].message, /queue already empty/);
+  sendNotification(
+    queuedMute,
+    "notifications.collision.soundState",
+    soundStateNotification(true),
+  );
+  assert.equal(
+    statusOf(queuedMute).recentEvents.filter((event) => event.event === "queue-cleared").length,
+    1,
+    "repeated provider mute with an empty queue is not logged again",
+  );
   sendNotification(
     queuedMute,
     "notifications.collision.235900004",
@@ -627,6 +642,24 @@ async function postOutputs(harness, body) {
     "non-monotonic Engine Audio Policy sequence is ignored",
   );
   engineMute.plugin.stop();
+
+  const emptyProviderMute = createHarness();
+  sendNotification(
+    emptyProviderMute,
+    "notifications.collision.soundState",
+    soundStateNotification(true),
+  );
+  assert.equal(emptyProviderMute.savedOptions.length, 0);
+  assert.equal(
+    statusOf(emptyProviderMute).recentEvents.some(
+      (event) =>
+        event.event === "queue-cleared" &&
+        event.message.includes("Provider muted audio"),
+    ),
+    false,
+    "provider mute does not log a no-op queue clear when nothing was pending",
+  );
+  emptyProviderMute.plugin.stop();
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -1236,17 +1236,30 @@ module.exports = function aisPlusAudio(app) {
 
   function clearQueuedAnnouncements(reason) {
     const removed = queue.length;
+    const preparingEntry = preparing?.entry || null;
+    const preparedEntry = prepared?.entry || null;
+    const cancelledPreparing =
+      preparingEntry && preparingEntry.superseded !== true;
+    const cancelledPrepared = preparedEntry && preparedEntry.superseded !== true;
     queue = [];
-    if (preparing?.entry) preparing.entry.superseded = true;
-    if (prepared?.entry) {
-      prepared.entry.superseded = true;
+    if (cancelledPreparing) preparingEntry.superseded = true;
+    if (cancelledPrepared) {
+      preparedEntry.superseded = true;
       cleanupPreparedAnnouncement(prepared);
       prepared = null;
     }
+    if (removed === 0 && !cancelledPreparing && !cancelledPrepared) return false;
+    const details = [];
+    if (removed > 0) {
+      details.push(`dropped ${removed} queued announcement${removed === 1 ? "" : "s"}`);
+    }
+    if (cancelledPreparing) details.push("cancelled in-flight preparation");
+    if (cancelledPrepared) details.push("discarded prepared announcement");
     addRecent(
       "queue-cleared",
-      `${reason}: ${removed > 0 ? `dropped ${removed} queued announcement${removed === 1 ? "" : "s"}` : "queue already empty"}`,
+      `${reason}: ${details.join(", ")}`,
     );
+    return true;
   }
 
   function isAudioMuted() {

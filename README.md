@@ -17,6 +17,8 @@ explicitly authoritative in Engine mode. Shadow policy remains observable but
 cannot mute Audio. Session changes reset sequence tracking and stale or
 non-monotonic policy updates are ignored.
 
+`v2.3.1` suppresses repeated no-op provider-mute queue-clear events, so the Audio recent-event log no longer fills with "Provider muted audio: queue already empty" while already muted.
+
 `v2.3.0` restores output routing controls in the AIS Plus Audio webapp. Browser
 playback is a local per-device setting, while Pi speaker output, radio stream
 output, and mute-all are saved on the Signal K server as Audio-owned settings.
@@ -72,7 +74,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.0 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.1 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
