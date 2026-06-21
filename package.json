@@ -1,7 +1,7 @@
 {
   "name": "signalk-ais-plus-audio",
-  "version": "2.3.1",
-  "description": "Piper audio renderer and browser audio bridge for Notifications Plus delivery events.",
+  "version": "2.3.2",
+  "description": "Watchkeeper Audio renderer and browser audio bridge for notification delivery events.",
   "main": "plugin/index.js",
   "scripts": {
     "test": "node --check plugin/index.js && node --check public/app.js && node --check test/aplay-volume.test.js && node test/aplay-volume.test.js"
@@ -34,7 +34,7 @@
   ],
   "signalk-plugin-enabled-by-default": false,
   "signalk": {
-    "displayName": "AIS Plus Audio",
+    "displayName": "Watchkeeper Audio",
     "appIcon": "./icon-120.png"
   }
 }

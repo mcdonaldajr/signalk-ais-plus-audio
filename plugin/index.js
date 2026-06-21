@@ -82,9 +82,9 @@ module.exports = function aisPlusAudio(app) {
   };
 
   plugin.id = PLUGIN_ID;
-  plugin.name = "AIS Plus Audio";
+  plugin.name = "Watchkeeper Audio";
   plugin.description =
-    "Renders AIS Plus announcement events into Piper audio for local speaker and browser clients.";
+    "Renders Watchkeeper announcement events into Piper audio for local speaker and browser clients.";
 
   plugin.start = (initialPluginOptions = {}) => {
     audioSessionId = randomUUID();

@@ -1,4 +1,4 @@
-# AIS Plus Audio
+# Watchkeeper Audio
 
 ## Version 2 baseline
 
@@ -28,7 +28,7 @@ measurement. Existing Pi, stream, and browser playback behavior is unchanged.
 
 > **Alpha Release disclaimer:** This software is Alpha Release and has not been tested in live environments and must not be relied upon for navigation or safety. The Authors do not accept any responsibility for loss or damage as a result of using this software.
 
-AIS Plus Audio is the standalone renderer for Notifications Plus audio-delivery events.
+Watchkeeper Audio is the standalone renderer for notification audio-delivery events.
 
 It replaces the older `announce-ais-messages` and standalone Lubuntu speaker paths by rendering each announcement once on the Signal K server:
 
@@ -78,7 +78,7 @@ npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.
 sudo systemctl restart signalk
 ```
 
-Open **AIS Plus Audio** from the Signal K webapps page.
+Open **Watchkeeper Audio** from the Signal K webapps page.
 
 The **Enable directional ping** checkbox in the AIS Plus Audio webapp can switch the ping on or off immediately while Signal K is running. The **Local speaker level** slider sets and saves the logarithmic default level for local `aplay` output, with its minimum mapped to `66%` mixer volume. The Signal K plugin configuration still provides the startup defaults and ping volume/frequency settings.
 
