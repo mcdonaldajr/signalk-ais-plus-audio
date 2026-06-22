@@ -434,42 +434,38 @@ async function postRepeatLast(harness) {
     "event",
     ["notifications.system.first"],
   );
-  await waitFor(() => {
+  const waitingPipelineStatus = await waitFor(() => {
     const status = statusOf(pipeline);
-    return status.recentEvents.some((event) => event.event === "preempting")
-      ? status
-      : null;
+    return status.active && status.queueLength >= 1 ? status : null;
   });
+  assert.equal(
+    waitingPipelineStatus.active.message,
+    "First pipeline announcement.",
+    "higher-priority announcement does not interrupt current speaker playback",
+  );
+  assert.equal(
+    waitingPipelineStatus.recentEvents.some((event) => event.event === "preempting"),
+    false,
+  );
   const completedPipelineStatus = await waitFor(
     () => {
       const status = statusOf(pipeline);
-      const preempted = status.recentEvents.some(
-        (event) => event.event === "preempted",
-      );
-      const secondStarted = status.recentEvents.some(
-        (event) =>
-          event.event === "speaker-started" &&
-          event.message.includes("Second pipeline announcement."),
-      );
-      const firstRestarted =
-        status.recentEvents.filter(
-          (event) =>
-            event.event === "speaker-started" &&
-            event.message.includes("First pipeline announcement."),
-        ).length >= 2;
-      const requeued = status.recentEvents.some(
-        (event) => event.event === "preempted-requeued",
-      );
-      return preempted && secondStarted && firstRestarted && requeued ? status : null;
+      return status.stats.rendered >= 2 ? status : null;
     },
-    3500,
+    8000,
   );
+  const pipelineStarts = completedPipelineStatus.recentEvents
+    .slice()
+    .reverse()
+    .filter((event) => event.event === "speaker-started")
+    .map((event) => event.message);
+  assert.match(pipelineStarts[0], /First pipeline announcement/);
+  assert.match(pipelineStarts[1], /Second pipeline announcement/);
   assert.equal(
     completedPipelineStatus.stats.failed,
     0,
-    "priority interruption is not counted as a rendering failure",
+    "queued priority handoff is not counted as a rendering failure",
   );
-  await waitFor(() => statusOf(pipeline).stats.rendered >= 2, 3500);
   pipeline.plugin.stop();
   await new Promise((resolve) => setTimeout(resolve, 50));
   fs.rmSync(pipeline.tempDir, { recursive: true, force: true });
@@ -493,7 +489,7 @@ async function postRepeatLast(harness) {
   );
   const waitingInformation = await waitFor(() => {
     const status = statusOf(nonPreempting);
-    return status.active && status.prepared ? status : null;
+    return status.active && status.queueLength >= 1 ? status : null;
   });
   assert.equal(
     waitingInformation.active.message,
@@ -528,7 +524,7 @@ async function postRepeatLast(harness) {
   );
   const lowerWaiting = await waitFor(() => {
     const status = statusOf(lowerPriority);
-    return status.active && status.prepared ? status : null;
+    return status.active && status.queueLength >= 1 ? status : null;
   });
   assert.equal(
     lowerWaiting.active.message,
@@ -559,30 +555,25 @@ async function postRepeatLast(harness) {
     vesselNotification("queued-alarm", "Alarm arrived during synthesis."),
     800,
   );
-  const alarmWonRace = await waitFor(
-    () => {
-      const status = statusOf(preparationRace);
-      const starts = status.recentEvents
-        .filter((event) => event.event === "speaker-started")
-        .map((event) => event.message);
-      return starts.length > 0 ? { status, starts } : null;
-    },
-    3000,
+  const synthesisRaceStatus = await waitFor(
+    () => (statusOf(preparationRace).stats.rendered >= 2 ? statusOf(preparationRace) : null),
+    5000,
   );
+  const synthesisStarts = synthesisRaceStatus.recentEvents
+    .slice()
+    .reverse()
+    .filter((event) => event.event === "speaker-started")
+    .map((event) => event.message);
   assert.match(
-    alarmWonRace.starts[0],
-    /Alarm arrived during synthesis/,
-    "higher-priority event queued during lower-priority synthesis gets the speaker first",
+    synthesisStarts[0],
+    /Warning preparing first/,
+    "an announcement already in synthesis keeps the speaker lane",
   );
+  assert.match(synthesisStarts[1], /Alarm arrived during synthesis/);
   assert.equal(
-    alarmWonRace.status.recentEvents.some(
-      (event) =>
-        event.event === "reprioritized" &&
-        event.message.includes("arrived during synthesis"),
-    ),
-    true,
+    synthesisRaceStatus.recentEvents.some((event) => event.event === "reprioritized"),
+    false,
   );
-  await waitFor(() => statusOf(preparationRace).stats.rendered >= 2, 4000);
   preparationRace.plugin.stop();
   await new Promise((resolve) => setTimeout(resolve, 50));
   fs.rmSync(preparationRace.tempDir, { recursive: true, force: true });

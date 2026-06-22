@@ -844,35 +844,6 @@ module.exports = function aisPlusAudio(app) {
           `Dropped ${removed} stale queued announcement${removed === 1 ? "" : "s"} for ${announcementDisplayName(entry)}`,
         );
       }
-      for (const pending of [preparing?.entry, prepared?.entry]) {
-        if (announcementSupersedeKey(pending) === supersedeKey) {
-          pending.superseded = true;
-          addRecent(
-            "superseded",
-            `Dropped stale pre-rendered announcement for ${announcementDisplayName(entry)}`,
-          );
-        }
-      }
-    }
-
-    if (
-      prepared?.entry &&
-      !prepared.entry.superseded &&
-      Number(entry.priorityScore || 0) > Number(prepared.entry.priorityScore || 0)
-    ) {
-      const displaced = prepared;
-      prepared = null;
-      displaced.entry.superseded = true;
-      displaced.mp3Promise.finally(() => {
-        cleanupPreparedAnnouncement(displaced);
-        queue.push(requeuePreparedEntry(displaced.entry));
-        sortAnnouncementQueue();
-        processQueue();
-      });
-      addRecent(
-        "reprioritized",
-        `Prepared ${displaced.entry.message} again after higher-priority ${entry.message}`,
-      );
     }
 
     entry.queuedAt = entry.queuedAt || new Date().toISOString();
@@ -893,7 +864,9 @@ module.exports = function aisPlusAudio(app) {
   }
 
   async function processQueue() {
-    if (!active && prepared) {
+    if (active || preparing) return;
+
+    if (prepared) {
       const next = prepared;
       prepared = null;
       if (next.entry.superseded || announcementExpired(next.entry)) {
@@ -908,8 +881,9 @@ module.exports = function aisPlusAudio(app) {
       } else {
         deliverPreparedAnnouncement(next);
       }
+      return;
     }
-    if (preparing || prepared || queue.length === 0) return;
+    if (queue.length === 0) return;
 
     const entry = queue.shift();
     entry.processingStartedAt = new Date().toISOString();
@@ -935,17 +909,8 @@ module.exports = function aisPlusAudio(app) {
       preparing = null;
       if (entry.superseded) {
         cleanupPreparedAnnouncement(next);
-      } else if (higherPriorityQueuedThan(entry)) {
-        next.mp3Promise.finally(() => cleanupPreparedAnnouncement(next));
-        queue.push(requeuePreparedEntry(entry));
-        sortAnnouncementQueue();
-        addRecent(
-          "reprioritized",
-          `Prepared ${entry.message} again after higher-priority ${queue[0].message} arrived during synthesis`,
-        );
       } else {
         prepared = next;
-        preemptActiveForPreparedAnnouncement();
       }
     } catch (error) {
       preparing = null;
@@ -1018,7 +983,6 @@ module.exports = function aisPlusAudio(app) {
     const { entry, combinedWav, mp3File, mp3FileName, metadataFile, mp3Promise } =
       preparation;
     active = entry;
-    processQueue();
     try {
       const shouldPlayLocally =
         !entry.streamOnly &&
@@ -1074,16 +1038,7 @@ module.exports = function aisPlusAudio(app) {
       addRecent("rendered", rendered.message);
       return rendered;
     } catch (error) {
-      if (entry.preemptedBy) {
-        publishTimeline("interrupted", entry, {
-          preemptedPlaybackId: entry.preemptedBy.playbackId || null,
-        });
-        addRecent(
-          "preempted",
-          `${entry.message} interrupted by higher-priority ${entry.preemptedBy.message}`,
-        );
-        requeueInterruptedAnnouncement(entry);
-      } else if (entry.cancelledByMute) {
+      if (entry.cancelledByMute) {
         publishTimeline("muted", entry);
         addRecent("muted", `${entry.message} stopped because audio was muted`);
       } else {
@@ -1104,112 +1059,11 @@ module.exports = function aisPlusAudio(app) {
     fs.rm(preparation.combinedWav, { force: true }, () => {});
   }
 
-  function preemptActiveForPreparedAnnouncement() {
-    if (!active || !prepared?.entry) {
-      return false;
-    }
-    prepared.entry.blockedBy = {
-      id: active.id,
-      message: active.message,
-      priorityScore: active.priorityScore,
-    };
-    if (
-      !currentLocalPlaybackChild ||
-      currentLocalPlaybackEntry !== active ||
-      Number(prepared.entry.priorityScore || 0) <= Number(active.priorityScore || 0)
-      || prepared.entry.preempt === false
-    ) {
-      return false;
-    }
-    active.preemptedBy = {
-      id: prepared.entry.id,
-      playbackId: prepared.entry.playbackId,
-      message: prepared.entry.message,
-      priorityScore: prepared.entry.priorityScore,
-    };
-    addRecent(
-      "preempting",
-      `[priority ${prepared.entry.priorityScore}] ${prepared.entry.message} is interrupting priority ${active.priorityScore} ${active.message}`,
-    );
-    currentLocalPlaybackChild.kill("SIGTERM");
-    return true;
-  }
-
-  function requeuePreparedEntry(entry) {
-    const requeued = {
-      ...entry,
-      superseded: false,
-      processingStartedAt: null,
-      synthesisStartedAt: null,
-      synthesisCompletedAt: null,
-      synthesisMs: null,
-      wavReadyAt: null,
-      preparedAt: null,
-      generatedToWavReadyMs: null,
-      mp3StartedAt: null,
-      mp3CompletedAt: null,
-      mp3Ms: null,
-    };
-    return requeued;
-  }
-
-  function requeueInterruptedAnnouncement(entry) {
-    const subjectKey = String(entry.vesselId || "").trim();
-    const remainsActive =
-      entry.lifecycle === "active" &&
-      subjectKey &&
-      activeNotificationSubjects.has(subjectKey);
-    if (
-      !remainsActive ||
-      entry.superseded ||
-      announcementExpired(entry) ||
-      isAudioMutedForEntry(entry) ||
-      (!options.enabled && !entry.force)
-    ) {
-      addRecent(
-        "preempted-not-requeued",
-        `${entry.message} was not repeated because it is no longer active, fresh, or audible`,
-      );
-      return false;
-    }
-    const replay = requeuePreparedEntry({
-      ...entry,
-      id: `${entry.id}-resume-${Date.now()}`,
-      playbackId: nextPlaybackId(),
-      preemptedBy: null,
-      blockedBy: null,
-      localPlaybackStartedAt: null,
-      localPlaybackCompletedAt: null,
-      localPlaybackMs: null,
-      generatedToSpeakerMs: null,
-      queueToSpeakerMs: null,
-      processingToSpeakerMs: null,
-      preparedToSpeakerMs: null,
-      resumeAfterPreemption: true,
-    });
-    queue.push(replay);
-    publishTimeline("resumed", replay);
-    sortAnnouncementQueue();
-    addRecent(
-      "preempted-requeued",
-      `${entry.message} will restart after the higher-priority announcement`,
-    );
-    return true;
-  }
-
   function sortAnnouncementQueue() {
     queue.sort(
       (left, right) =>
         Number(right.priorityScore || 0) - Number(left.priorityScore || 0) ||
         Date.parse(left.timestamp || 0) - Date.parse(right.timestamp || 0),
-    );
-  }
-
-  function higherPriorityQueuedThan(entry) {
-    sortAnnouncementQueue();
-    return (
-      queue.length > 0 &&
-      Number(queue[0].priorityScore || 0) > Number(entry?.priorityScore || 0)
     );
   }
 
@@ -1870,12 +1724,9 @@ module.exports = function aisPlusAudio(app) {
       entry.queueToSpeakerMs = elapsedMs(entry.queuedAt, startedAt);
       entry.processingToSpeakerMs = elapsedMs(entry.processingStartedAt, startedAt);
       entry.preparedToSpeakerMs = elapsedMs(entry.preparedAt, startedAt);
-      const blocker = entry.blockedBy?.message
-        ? `, blocked by "${entry.blockedBy.message}"`
-        : "";
       addRecent(
         "speaker-started",
-        `[priority ${entry.priorityScore}] ${entry.message} (provider-to-speaker ${formatDurationMs(entry.generatedToSpeakerMs)}, queued-to-speaker ${formatDurationMs(entry.queueToSpeakerMs)}, synthesis ${formatDurationMs(entry.synthesisMs)}, ready wait ${formatDurationMs(entry.preparedToSpeakerMs)}${blocker})`,
+        `[priority ${entry.priorityScore}] ${entry.message} (provider-to-speaker ${formatDurationMs(entry.generatedToSpeakerMs)}, queued-to-speaker ${formatDurationMs(entry.queueToSpeakerMs)}, synthesis ${formatDurationMs(entry.synthesisMs)}, ready wait ${formatDurationMs(entry.preparedToSpeakerMs)})`,
       );
       publishTimeline("speaker-started", entry, {
         speakerStartedAt: startedAt,
@@ -1885,7 +1736,6 @@ module.exports = function aisPlusAudio(app) {
     try {
     await runProcess(options.audioPlayer, [file], null, (child) => {
         currentLocalPlaybackChild = child;
-        preemptActiveForPreparedAnnouncement();
       });
     } finally {
       currentLocalPlaybackChild = null;
