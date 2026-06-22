@@ -8,7 +8,9 @@ const ACCESS_TOKEN_STORAGE_KEY = "aisPlusAudio.accessToken";
 const ACCESS_REQUEST_STORAGE_KEY = "aisPlusAudio.accessRequestHref";
 const CLIENT_ID_STORAGE_KEY = "aisPlusAudio.clientId";
 const BROWSER_OUTPUT_STORAGE_KEY = "aisPlusAudio.browserOutput";
+const BROWSER_OUTPUT_MODE_STORAGE_KEY = "aisPlusAudio.browserOutputMode";
 const LEGACY_BROWSER_SPEECH_STORAGE_KEYS = ["checkBrowserSpeech"];
+const BROWSER_OUTPUT_MODES = ["off", "speech", "piper"];
 const REQUEST_TIMEOUT_MS = 8000;
 const statusPill = document.getElementById("statusPill");
 const queueLength = document.getElementById("queueLength");
@@ -26,7 +28,9 @@ const streamUrl = document.getElementById("streamUrl");
 const streamDiagnostics = document.getElementById("streamDiagnostics");
 const events = document.getElementById("events");
 const checkPingEnabled = document.getElementById("checkPingEnabled");
-const checkBrowserOutput = document.getElementById("checkBrowserOutput");
+const browserOutputModeInputs = Array.from(
+  document.querySelectorAll('input[name="browserOutputMode"]'),
+);
 const checkPiOutput = document.getElementById("checkPiOutput");
 const checkStreamOutput = document.getElementById("checkStreamOutput");
 const checkMuteAll = document.getElementById("checkMuteAll");
@@ -37,8 +41,9 @@ const aplayVolumeStatus = document.getElementById("aplayVolumeStatus");
 let accessToken = readStoredValue(ACCESS_TOKEN_STORAGE_KEY);
 let accessRequestTimer = null;
 let localNotice = null;
-let browserOutputEnabled = readStoredValue(BROWSER_OUTPUT_STORAGE_KEY) === "true";
+let browserOutputMode = initialBrowserOutputMode();
 let lastBrowserAudioUrl = "";
+let lastBrowserSpeechKey = "";
 let firstStatusRender = true;
 
 window.addEventListener("error", (event) => {
@@ -69,17 +74,22 @@ checkPingEnabled.addEventListener("change", () => {
     renderCommandError,
   );
 });
-checkBrowserOutput.addEventListener("change", () => {
-  browserOutputEnabled = checkBrowserOutput.checked;
-  writeStoredValue(BROWSER_OUTPUT_STORAGE_KEY, browserOutputEnabled ? "true" : "false");
-  if (browserOutputEnabled) disableCompetingBrowserSpeech();
-  outputStatus.textContent = browserOutputEnabled
-    ? "Browser playback enabled here; simple browser speech disabled for this device."
-    : "Browser playback disabled for this device.";
-  if (browserOutputEnabled && lastAudio.getAttribute("src")) {
-    playLastAudioInBrowser(true);
-  }
-});
+for (const input of browserOutputModeInputs) {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    browserOutputMode = normalizeBrowserOutputMode(input.value);
+    saveBrowserOutputMode(browserOutputMode);
+    disableCompetingBrowserSpeech();
+    outputStatus.textContent = browserOutputModeStatusText(browserOutputMode);
+    if (browserOutputMode === "piper" && lastAudio.getAttribute("src")) {
+      playLastAudioInBrowser(true);
+    } else if (browserOutputMode === "speech") {
+      speakLastAnnouncementInBrowser(true);
+    } else {
+      stopBrowserOutputs();
+    }
+  });
+}
 checkPiOutput.addEventListener("change", saveOutputRouting);
 checkStreamOutput.addEventListener("change", saveOutputRouting);
 checkMuteAll.addEventListener("change", saveOutputRouting);
@@ -171,7 +181,7 @@ function renderStatus(status) {
       lastAudio.hidden = false;
       if (lastAudio.getAttribute("src") !== announcementAudioUrl) {
         lastAudio.setAttribute("src", announcementAudioUrl);
-        if (browserOutputEnabled && !firstStatusRender) playLastAudioInBrowser(false);
+        playBrowserAnnouncement(false, status.lastAnnouncement);
       }
     } else {
       lastAudio.hidden = true;
@@ -202,8 +212,8 @@ async function saveOutputRouting() {
 }
 
 function renderOutputRouting(status) {
-  if (browserOutputEnabled) disableCompetingBrowserSpeech();
-  checkBrowserOutput.checked = browserOutputEnabled;
+  disableCompetingBrowserSpeech();
+  renderBrowserOutputMode();
   if (document.activeElement !== checkPiOutput) {
     checkPiOutput.checked = status.localPlayback !== false;
   }
@@ -218,16 +228,58 @@ function renderOutputRouting(status) {
   if (status.engineMuted) mutedReasons.push("muted by Traffic Core");
   if (status.aisPlusMuted) mutedReasons.push("muted by AIS Plus");
   outputStatus.textContent = [
-    `Browser ${browserOutputEnabled ? "on" : "off"}`,
+    `Browser ${browserOutputModeLabel(browserOutputMode)}`,
     `Pi speaker ${status.localPlayback !== false ? "on" : "off"}`,
     `radio stream ${status.liveStream !== false ? "on" : "off"}`,
     mutedReasons.length ? mutedReasons.join(", ") : "not muted",
   ].join(" · ");
 }
 
+function initialBrowserOutputMode() {
+  const storedMode = normalizeBrowserOutputMode(readStoredValue(BROWSER_OUTPUT_MODE_STORAGE_KEY));
+  if (storedMode) return storedMode;
+  return readStoredValue(BROWSER_OUTPUT_STORAGE_KEY) === "true" ? "piper" : "off";
+}
+
+function normalizeBrowserOutputMode(mode) {
+  return BROWSER_OUTPUT_MODES.includes(mode) ? mode : "";
+}
+
+function saveBrowserOutputMode(mode) {
+  writeStoredValue(BROWSER_OUTPUT_MODE_STORAGE_KEY, mode);
+  writeStoredValue(BROWSER_OUTPUT_STORAGE_KEY, mode === "piper" ? "true" : "false");
+}
+
+function renderBrowserOutputMode() {
+  for (const input of browserOutputModeInputs) {
+    input.checked = input.value === browserOutputMode;
+  }
+}
+
 function disableCompetingBrowserSpeech() {
   for (const key of LEGACY_BROWSER_SPEECH_STORAGE_KEYS) {
     writeStoredValue(key, "false");
+  }
+}
+
+function browserOutputModeLabel(mode) {
+  if (mode === "speech") return "speech synthesis";
+  if (mode === "piper") return "Piper playback";
+  return "off";
+}
+
+function browserOutputModeStatusText(mode) {
+  if (mode === "speech") return "Browser speech synthesis selected for this device.";
+  if (mode === "piper") return "Watchkeeper Piper browser playback selected for this device.";
+  return "Browser output disabled for this device.";
+}
+
+function playBrowserAnnouncement(userInitiated, announcement) {
+  if (firstStatusRender && !userInitiated) return;
+  if (browserOutputMode === "piper") {
+    playLastAudioInBrowser(userInitiated);
+  } else if (browserOutputMode === "speech") {
+    speakLastAnnouncementInBrowser(userInitiated, announcement);
   }
 }
 
@@ -247,6 +299,33 @@ function playLastAudioInBrowser(userInitiated) {
       outputStatus.textContent =
         `Browser playback needs a tap here first: ${error.message || error}`;
     });
+}
+
+function speakLastAnnouncementInBrowser(userInitiated, announcement = null) {
+  const message = String(
+    announcement?.message || lastAnnouncement.textContent || "",
+  ).trim();
+  if (!message || message === "No announcement received yet.") return;
+  const speech = window.speechSynthesis;
+  const Utterance = window.SpeechSynthesisUtterance;
+  if (!speech || !Utterance) {
+    outputStatus.textContent = "Browser speech synthesis is not available on this device.";
+    return;
+  }
+  const speechKey = `${message}:${announcement?.audioUrl || announcement?.publicAudioUrl || ""}`;
+  if (!userInitiated && speechKey === lastBrowserSpeechKey) return;
+  lastBrowserSpeechKey = speechKey;
+  speech.cancel();
+  speech.speak(new Utterance(message));
+  outputStatus.textContent = userInitiated
+    ? "Browser speech synthesis selected and last announcement spoken."
+    : "Browser speech synthesis started.";
+}
+
+function stopBrowserOutputs() {
+  lastAudio.pause();
+  lastBrowserAudioUrl = "";
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
 function renderAplayVolumeControl(status) {

@@ -138,6 +138,20 @@ button.secondary {
   margin-top: 8px;
 }
 
+.toggle-group {
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  margin: 10px 0 0;
+  padding: 10px 12px 12px;
+}
+
+.toggle-group legend {
+  color: #bae6fd;
+  font-size: 0.86rem;
+  font-weight: 900;
+  padding: 0 6px;
+}
+
 .slider-control {
   background: #0b1423;
   border-radius: 10px;

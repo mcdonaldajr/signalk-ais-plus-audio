@@ -293,14 +293,18 @@ async function postOutputs(harness, body) {
   const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
   const browserApp = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
   assert.match(html, /Output routing/);
-  assert.match(html, /checkBrowserOutput/);
+  assert.match(html, /browserOutputOff/);
+  assert.match(html, /browserOutputSpeech/);
+  assert.match(html, /browserOutputPiper/);
   assert.match(html, /checkPiOutput/);
   assert.match(html, /checkStreamOutput/);
   assert.match(html, /checkMuteAll/);
-  assert.match(browserApp, /BROWSER_OUTPUT_STORAGE_KEY/);
+  assert.match(browserApp, /BROWSER_OUTPUT_MODE_STORAGE_KEY/);
+  assert.match(browserApp, /BROWSER_OUTPUT_MODES/);
   assert.match(browserApp, /LEGACY_BROWSER_SPEECH_STORAGE_KEYS/);
   assert.match(browserApp, /checkBrowserSpeech/);
   assert.match(browserApp, /disableCompetingBrowserSpeech/);
+  assert.match(browserApp, /speakLastAnnouncementInBrowser/);
   assert.match(browserApp, /postJson\("outputs"/);
 
   const defaults = createHarness();
