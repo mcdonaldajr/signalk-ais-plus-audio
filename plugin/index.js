@@ -532,6 +532,9 @@ module.exports = function aisPlusAudio(app) {
       if (!options.liveStream) {
         restartLiveStreamClients("radio stream disabled");
       }
+      if (!previous.muted && options.muted) {
+        clearAudibleWork("Audio muted from webapp");
+      }
       addRecent(
         "settings",
         [
@@ -726,7 +729,7 @@ module.exports = function aisPlusAudio(app) {
       projection.mode === "engine" &&
       projection.muted === true;
     if (!wasMuted && engineMuted) {
-      clearQueuedAnnouncements("Engine audio policy muted audio");
+      clearAudibleWork("Engine audio policy muted audio");
     }
     publishStatus();
   }
@@ -1080,6 +1083,9 @@ module.exports = function aisPlusAudio(app) {
           `${entry.message} interrupted by higher-priority ${entry.preemptedBy.message}`,
         );
         requeueInterruptedAnnouncement(entry);
+      } else if (entry.cancelledByMute) {
+        publishTimeline("muted", entry);
+        addRecent("muted", `${entry.message} stopped because audio was muted`);
       } else {
         stats.failed += 1;
         publishTimeline("failed", entry, { error: error.message });
@@ -1259,6 +1265,12 @@ module.exports = function aisPlusAudio(app) {
     );
   }
 
+  function clearAudibleWork(reason) {
+    const cleared = clearQueuedAnnouncements(reason);
+    const stopped = stopActiveLocalPlayback(reason);
+    return cleared || stopped;
+  }
+
   function clearQueuedAnnouncements(reason) {
     const removed = queue.length;
     const preparingEntry = preparing?.entry || null;
@@ -1284,6 +1296,15 @@ module.exports = function aisPlusAudio(app) {
       "queue-cleared",
       `${reason}: ${details.join(", ")}`,
     );
+    return true;
+  }
+
+  function stopActiveLocalPlayback(reason) {
+    if (!currentLocalPlaybackChild || !currentLocalPlaybackEntry) return false;
+    currentLocalPlaybackEntry.cancelledByMute = true;
+    currentLocalPlaybackEntry.superseded = true;
+    currentLocalPlaybackChild.kill("SIGTERM");
+    addRecent("speaker-stopped", `${reason}: stopped current speaker playback`);
     return true;
   }
 

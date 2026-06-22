@@ -714,6 +714,25 @@ async function postRepeatLast(harness) {
   assert.equal(statusOf(mutedRepeat).stats.queued, beforeRepeat);
   mutedRepeat.plugin.stop();
 
+  const muteStopsPlayback = createPipelineHarness();
+  sendNotification(
+    muteStopsPlayback,
+    "notifications.system.long-playback",
+    vesselNotification("long-playback", "This playback should stop when muted."),
+  );
+  await waitFor(() => statusOf(muteStopsPlayback).active);
+  const muteStopsBody = await postOutputs(muteStopsPlayback, { muted: true });
+  assert.equal(muteStopsBody.statusCode, 200);
+  await waitFor(() =>
+    statusOf(muteStopsPlayback).recentEvents.some(
+      (event) => event.event === "speaker-stopped",
+    ),
+  );
+  await waitFor(() => !statusOf(muteStopsPlayback).active);
+  assert.equal(statusOf(muteStopsPlayback).stats.failed, 0);
+  muteStopsPlayback.plugin.stop();
+  fs.rmSync(muteStopsPlayback.tempDir, { recursive: true, force: true });
+
   const engineMute = createHarness();
   sendEngineAudioPolicy(engineMute, { muted: true, sequence: 1 });
   assert.equal(statusOf(engineMute).engineMuted, true);
