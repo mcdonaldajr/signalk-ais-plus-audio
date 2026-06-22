@@ -289,6 +289,24 @@ async function postOutputs(harness, body) {
   return responseBody;
 }
 
+async function postRepeatLast(harness) {
+  let responseBody;
+  await harness.posts.get("/repeat-last")(
+    {},
+    {
+      statusCode: 200,
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(value) {
+        responseBody = { statusCode: this.statusCode, ...value };
+      },
+    },
+  );
+  return responseBody;
+}
+
 (async () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
   const browserApp = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
@@ -668,6 +686,33 @@ async function postOutputs(harness, body) {
   );
   assert.equal(statusOf(duplicateRequest).stats.filtered, 1);
   duplicateRequest.plugin.stop();
+
+  const mutedSkip = createHarness({ muted: true });
+  sendNotification(
+    mutedSkip,
+    "notifications.system.gps-received",
+    vesselNotification("gps-received", "GPS received."),
+  );
+  assert.equal(statusOf(mutedSkip).lastAnnouncement, null);
+  const mutedSkipRepeat = await postRepeatLast(mutedSkip);
+  assert.equal(mutedSkipRepeat.statusCode, 404);
+  mutedSkip.plugin.stop();
+
+  const mutedRepeat = createHarness({ localPlayback: false, liveStream: false });
+  sendNotification(
+    mutedRepeat,
+    "notifications.system.first-repeatable",
+    vesselNotification("first-repeatable", "First repeatable announcement."),
+  );
+  assert.equal(statusOf(mutedRepeat).stats.queued, 1);
+  assert.equal(statusOf(mutedRepeat).lastAnnouncement.message, "First repeatable announcement.");
+  await postOutputs(mutedRepeat, { muted: true });
+  const beforeRepeat = statusOf(mutedRepeat).stats.queued;
+  const mutedRepeatBody = await postRepeatLast(mutedRepeat);
+  assert.equal(mutedRepeatBody.statusCode, 409);
+  assert.match(mutedRepeatBody.error, /muted/i);
+  assert.equal(statusOf(mutedRepeat).stats.queued, beforeRepeat);
+  mutedRepeat.plugin.stop();
 
   const engineMute = createHarness();
   sendEngineAudioPolicy(engineMute, { muted: true, sequence: 1 });

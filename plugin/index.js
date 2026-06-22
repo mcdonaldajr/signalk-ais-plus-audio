@@ -567,10 +567,18 @@ module.exports = function aisPlusAudio(app) {
         res.status(404).json({ error: "No announcement has been received yet." });
         return;
       }
+      if (!options.enabled) {
+        res.status(409).json({ ok: false, error: "Audio is disabled." });
+        return;
+      }
+      if (isAudioMuted()) {
+        res.status(409).json({ ok: false, error: "Audio is muted." });
+        return;
+      }
       enqueue({
         ...lastAnnouncement,
         id: `repeat-${Date.now()}`,
-        force: true,
+        force: false,
       });
       res.json({ ok: true });
     }));
@@ -808,7 +816,6 @@ module.exports = function aisPlusAudio(app) {
 
   function enqueue(entry) {
     if (!entry?.message) return;
-    lastAnnouncement = entry;
 
     if (!options.enabled && !entry.force) {
       addRecent("skipped", `Audio disabled: ${entry.message}`);
@@ -818,6 +825,8 @@ module.exports = function aisPlusAudio(app) {
       addRecent("skipped", `Muted: ${entry.message}`);
       return;
     }
+
+    lastAnnouncement = entry;
 
     const supersedeKey = announcementSupersedeKey(entry);
     if (supersedeKey) {
