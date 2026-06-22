@@ -2,6 +2,11 @@
 
 ## Version 2 baseline
 
+`v2.3.9` lets Watchkeeper Console host browser announcement playback from its
+root window. When Audio is embedded by Console it still shows and saves browser
+output settings, but suppresses its own iframe playback to avoid double speech.
+Opened directly, Watchkeeper Audio remains fully standalone.
+
 `v2.3.8` makes Audio mute authority explicit: only Watchkeeper Audio's manual
 mute and Traffic Core's Audio Policy can mute playback. Provider
 `delivery.muteState` flags are ignored by Audio.
@@ -97,7 +102,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.8 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.9 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 

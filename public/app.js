@@ -11,6 +11,8 @@ const BROWSER_OUTPUT_STORAGE_KEY = "aisPlusAudio.browserOutput";
 const BROWSER_OUTPUT_MODE_STORAGE_KEY = "aisPlusAudio.browserOutputMode";
 const LEGACY_BROWSER_SPEECH_STORAGE_KEYS = ["checkBrowserSpeech"];
 const BROWSER_OUTPUT_MODES = ["off", "speech", "piper"];
+const CONSOLE_AUDIO_HOSTED =
+  new URLSearchParams(window.location.search).get("consoleAudioHost") === "1";
 const REQUEST_TIMEOUT_MS = 8000;
 const statusPill = document.getElementById("statusPill");
 const queueLength = document.getElementById("queueLength");
@@ -81,6 +83,10 @@ for (const input of browserOutputModeInputs) {
     saveBrowserOutputMode(browserOutputMode);
     disableCompetingBrowserSpeech();
     outputStatus.textContent = browserOutputModeStatusText(browserOutputMode);
+    if (CONSOLE_AUDIO_HOSTED && browserOutputMode !== "off") {
+      outputStatus.textContent += " Console will play browser audio while embedded.";
+      return;
+    }
     if (browserOutputMode === "piper" && lastAudio.getAttribute("src")) {
       playLastAudioInBrowser(true);
     } else if (browserOutputMode === "speech") {
@@ -274,6 +280,7 @@ function browserOutputModeStatusText(mode) {
 }
 
 function playBrowserAnnouncement(userInitiated, announcement) {
+  if (CONSOLE_AUDIO_HOSTED) return;
   if (firstStatusRender && !userInitiated) return;
   if (browserOutputMode === "piper") {
     playLastAudioInBrowser(userInitiated);

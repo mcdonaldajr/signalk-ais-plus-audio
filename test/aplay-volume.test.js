@@ -301,6 +301,8 @@ async function postOutputs(harness, body) {
   assert.match(html, /checkMuteAll/);
   assert.match(browserApp, /BROWSER_OUTPUT_MODE_STORAGE_KEY/);
   assert.match(browserApp, /BROWSER_OUTPUT_MODES/);
+  assert.match(browserApp, /CONSOLE_AUDIO_HOSTED/);
+  assert.match(browserApp, /consoleAudioHost/);
   assert.match(browserApp, /LEGACY_BROWSER_SPEECH_STORAGE_KEYS/);
   assert.match(browserApp, /checkBrowserSpeech/);
   assert.match(browserApp, /disableCompetingBrowserSpeech/);
