@@ -2,6 +2,9 @@
 
 ## Version 2 baseline
 
+`v2.3.10` gives Watchkeeper Audio command buttons raised/pressed visual states
+and a short command-sent pulse so touchscreen taps are visibly acknowledged.
+
 `v2.3.9` lets Watchkeeper Console host browser announcement playback from its
 root window. When Audio is embedded by Console it still shows and saves browser
 output settings, but suppresses its own iframe playback to avoid double speech.
@@ -102,7 +105,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.9 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.10 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 

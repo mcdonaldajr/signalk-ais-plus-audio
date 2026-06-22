@@ -56,21 +56,11 @@ window.addEventListener("unhandledrejection", (event) => {
   renderStartupError(reason.message || String(reason) || "Watchkeeper Audio request failed");
 });
 
-document.getElementById("buttonSoundCheck").addEventListener("click", () => {
-  postJson("sound-check").catch(renderCommandError);
-});
-document.getElementById("buttonRepeatLast").addEventListener("click", () => {
-  postJson("repeat-last").catch(renderCommandError);
-});
-document.getElementById("buttonClearQueue").addEventListener("click", () => {
-  postJson("clear-queue").catch(renderCommandError);
-});
-document.getElementById("buttonRestartStreams").addEventListener("click", () => {
-  postJson("restart-streams").catch(renderCommandError);
-});
-document.getElementById("buttonStreamTimeCheck").addEventListener("click", () => {
-  postJson("stream-time-check").catch(renderCommandError);
-});
+bindCommandButton("buttonSoundCheck", "sound-check", "Sound check sent.");
+bindCommandButton("buttonRepeatLast", "repeat-last", "Repeat last sent.");
+bindCommandButton("buttonClearQueue", "clear-queue", "Clear queue sent.");
+bindCommandButton("buttonRestartStreams", "restart-streams", "Restart streams sent.");
+bindCommandButton("buttonStreamTimeCheck", "stream-time-check", "Stream time check sent.");
 checkPingEnabled.addEventListener("change", () => {
   postJson(`ping-enabled?enabled=${checkPingEnabled.checked ? "true" : "false"}`).catch(
     renderCommandError,
@@ -142,6 +132,22 @@ async function postJson(path, body = null) {
   });
   await readResponse(response, path);
   await refresh();
+}
+
+function bindCommandButton(id, path, message) {
+  const button = document.getElementById(id);
+  button.addEventListener("click", () => {
+    signalCommandButton(button, message);
+    postJson(path).catch(renderCommandError);
+  });
+}
+
+function signalCommandButton(button, message) {
+  button.classList.remove("command-sent");
+  void button.offsetWidth;
+  button.classList.add("command-sent");
+  outputStatus.textContent = message;
+  window.setTimeout(() => button.classList.remove("command-sent"), 700);
 }
 
 async function readResponse(response, path) {

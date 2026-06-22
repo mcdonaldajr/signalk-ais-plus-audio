@@ -292,6 +292,7 @@ async function postOutputs(harness, body) {
 (async () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
   const browserApp = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const browserCss = fs.readFileSync(path.join(__dirname, "..", "public", "styles.css"), "utf8");
   assert.match(html, /Output routing/);
   assert.match(html, /browserOutputOff/);
   assert.match(html, /browserOutputSpeech/);
@@ -309,7 +310,12 @@ async function postOutputs(harness, body) {
   assert.match(browserApp, /speakLastAnnouncementInBrowser/);
   assert.doesNotMatch(browserApp, /muted by notification provider/);
   assert.doesNotMatch(browserApp, /muted by AIS Plus/);
+  assert.match(browserApp, /bindCommandButton/);
+  assert.match(browserApp, /signalCommandButton/);
   assert.match(browserApp, /postJson\("outputs"/);
+  assert.match(browserCss, /button\.command-sent/);
+  assert.match(browserCss, /transform:\s*translateY\(4px\)/);
+  assert.match(browserCss, /box-shadow/);
 
   const defaults = createHarness();
   assert.deepEqual(
