@@ -96,6 +96,9 @@ function sendNotification(
             value: {
               audioSequence: harness.brokerSequence,
               active: activeSubjects.map((subjectKey) => ({ subjectKey })),
+              audioRequest: value?.data?.audioRequest || {
+                requestId: `test-broker:${harness.brokerSequence}`,
+              },
               lastAudioEvent: {
                 schemaVersion: 1,
                 provider: "ais-plus",
@@ -621,6 +624,33 @@ async function postOutputs(harness, body) {
   await new Promise((resolve) => setTimeout(resolve, 1100));
   queuedMute.plugin.stop();
   fs.rmSync(queuedMute.tempDir, { recursive: true, force: true });
+
+  const duplicateRequest = createHarness();
+  const duplicatedNotification = vesselNotification(
+    "duplicate-audio",
+    "This duplicate should only queue once.",
+  );
+  duplicatedNotification.data.audioRequest = {
+    requestId: "same-notifications-plus-request",
+  };
+  sendNotification(
+    duplicateRequest,
+    "notifications.collision.duplicate",
+    duplicatedNotification,
+  );
+  assert.equal(statusOf(duplicateRequest).stats.queued, 1);
+  sendNotification(
+    duplicateRequest,
+    "notifications.collision.duplicate",
+    duplicatedNotification,
+  );
+  assert.equal(
+    statusOf(duplicateRequest).stats.queued,
+    1,
+    "same Notifications Plus requestId is not queued twice",
+  );
+  assert.equal(statusOf(duplicateRequest).stats.filtered, 1);
+  duplicateRequest.plugin.stop();
 
   const engineMute = createHarness();
   sendEngineAudioPolicy(engineMute, { muted: true, sequence: 1 });

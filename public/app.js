@@ -38,6 +38,7 @@ let accessRequestTimer = null;
 let localNotice = null;
 let browserOutputEnabled = readStoredValue(BROWSER_OUTPUT_STORAGE_KEY) === "true";
 let lastBrowserAudioUrl = "";
+let firstStatusRender = true;
 
 window.addEventListener("error", (event) => {
   renderStartupError(event.message || "Watchkeeper Audio browser script failed");
@@ -168,7 +169,7 @@ function renderStatus(status) {
       lastAudio.hidden = false;
       if (lastAudio.getAttribute("src") !== announcementAudioUrl) {
         lastAudio.setAttribute("src", announcementAudioUrl);
-        if (browserOutputEnabled) playLastAudioInBrowser(false);
+        if (browserOutputEnabled && !firstStatusRender) playLastAudioInBrowser(false);
       }
     } else {
       lastAudio.hidden = true;
@@ -182,6 +183,7 @@ function renderStatus(status) {
   }
 
   renderEvents(status.recentEvents || []);
+  firstStatusRender = false;
 }
 
 async function saveOutputRouting() {

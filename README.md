@@ -2,6 +2,10 @@
 
 ## Version 2 baseline
 
+`v2.3.4` deduplicates repeated Notifications Plus audio requests by request ID
+and prevents the webapp from autoplaying an old last announcement when the
+Watchkeeper Audio tab is reopened from Console.
+
 `v2.3.3` completes the public webapp naming pass: visible labels now say
 Watchkeeper Audio, and the main page no longer presents Piper as the app name.
 

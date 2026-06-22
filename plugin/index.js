@@ -42,6 +42,7 @@ module.exports = function aisPlusAudio(app) {
   let lastEngineAudioPolicySequence = 0;
   let notificationsPlusSessionId = "";
   let lastNotificationsPlusAudioSequence = 0;
+  let processedNotificationsPlusAudioRequests = new Set();
   let audioSessionId = randomUUID();
   let audioTimelineSequence = 0;
   let audioPlaybackSequence = 0;
@@ -93,6 +94,7 @@ module.exports = function aisPlusAudio(app) {
     timeline = null;
     notificationsPlusSessionId = "";
     lastNotificationsPlusAudioSequence = 0;
+    processedNotificationsPlusAudioRequests = new Set();
     engineMuted = false;
     engineAudioPolicy = null;
     engineSessionId = "";
@@ -748,6 +750,16 @@ module.exports = function aisPlusAudio(app) {
 
   function handleNotificationsPlusAudio(envelope, request = null) {
     const receivedAt = new Date().toISOString();
+    const requestKey = notificationsPlusAudioRequestKey(envelope, request);
+    if (requestKey && processedNotificationsPlusAudioRequests.has(requestKey)) {
+      stats.filtered += 1;
+      addRecent(
+        "duplicate",
+        `Ignored duplicate audio request: ${envelope?.presentation?.message || requestKey}`,
+      );
+      return;
+    }
+    rememberNotificationsPlusAudioRequest(requestKey);
     const muteState = envelope?.delivery?.muteState;
     if (muteState === true) {
       aisPlusMuted = true;
@@ -788,6 +800,24 @@ module.exports = function aisPlusAudio(app) {
     });
     publishTimeline("accepted", entry);
     enqueue(entry);
+  }
+
+  function notificationsPlusAudioRequestKey(envelope, request) {
+    return String(
+      request?.requestId ||
+        envelope?.audioSequence ||
+        envelope?.eventId ||
+        "",
+    ).trim();
+  }
+
+  function rememberNotificationsPlusAudioRequest(requestKey) {
+    if (!requestKey) return;
+    processedNotificationsPlusAudioRequests.add(requestKey);
+    if (processedNotificationsPlusAudioRequests.size <= 200) return;
+    processedNotificationsPlusAudioRequests = new Set(
+      [...processedNotificationsPlusAudioRequests].slice(-160),
+    );
   }
 
   function enqueue(entry) {
