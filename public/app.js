@@ -8,6 +8,7 @@ const ACCESS_TOKEN_STORAGE_KEY = "aisPlusAudio.accessToken";
 const ACCESS_REQUEST_STORAGE_KEY = "aisPlusAudio.accessRequestHref";
 const CLIENT_ID_STORAGE_KEY = "aisPlusAudio.clientId";
 const BROWSER_OUTPUT_STORAGE_KEY = "aisPlusAudio.browserOutput";
+const LEGACY_BROWSER_SPEECH_STORAGE_KEYS = ["checkBrowserSpeech"];
 const REQUEST_TIMEOUT_MS = 8000;
 const statusPill = document.getElementById("statusPill");
 const queueLength = document.getElementById("queueLength");
@@ -71,8 +72,9 @@ checkPingEnabled.addEventListener("change", () => {
 checkBrowserOutput.addEventListener("change", () => {
   browserOutputEnabled = checkBrowserOutput.checked;
   writeStoredValue(BROWSER_OUTPUT_STORAGE_KEY, browserOutputEnabled ? "true" : "false");
+  if (browserOutputEnabled) disableCompetingBrowserSpeech();
   outputStatus.textContent = browserOutputEnabled
-    ? "Browser playback enabled for this device."
+    ? "Browser playback enabled here; simple browser speech disabled for this device."
     : "Browser playback disabled for this device.";
   if (browserOutputEnabled && lastAudio.getAttribute("src")) {
     playLastAudioInBrowser(true);
@@ -200,6 +202,7 @@ async function saveOutputRouting() {
 }
 
 function renderOutputRouting(status) {
+  if (browserOutputEnabled) disableCompetingBrowserSpeech();
   checkBrowserOutput.checked = browserOutputEnabled;
   if (document.activeElement !== checkPiOutput) {
     checkPiOutput.checked = status.localPlayback !== false;
@@ -220,6 +223,12 @@ function renderOutputRouting(status) {
     `radio stream ${status.liveStream !== false ? "on" : "off"}`,
     mutedReasons.length ? mutedReasons.join(", ") : "not muted",
   ].join(" · ");
+}
+
+function disableCompetingBrowserSpeech() {
+  for (const key of LEGACY_BROWSER_SPEECH_STORAGE_KEYS) {
+    writeStoredValue(key, "false");
+  }
 }
 
 function playLastAudioInBrowser(userInitiated) {

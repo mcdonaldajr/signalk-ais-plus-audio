@@ -298,6 +298,9 @@ async function postOutputs(harness, body) {
   assert.match(html, /checkStreamOutput/);
   assert.match(html, /checkMuteAll/);
   assert.match(browserApp, /BROWSER_OUTPUT_STORAGE_KEY/);
+  assert.match(browserApp, /LEGACY_BROWSER_SPEECH_STORAGE_KEYS/);
+  assert.match(browserApp, /checkBrowserSpeech/);
+  assert.match(browserApp, /disableCompetingBrowserSpeech/);
   assert.match(browserApp, /postJson\("outputs"/);
 
   const defaults = createHarness();

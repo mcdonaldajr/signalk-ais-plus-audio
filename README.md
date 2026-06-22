@@ -2,6 +2,11 @@
 
 ## Version 2 baseline
 
+`v2.3.5` keeps Watchkeeper Audio as the browser-audio authority on each device:
+enabling Browser playback in Watchkeeper Audio disables the older simple browser
+speech setting in that same browser, while Pi speaker, radio stream, and mute
+remain independent switches.
+
 `v2.3.4` deduplicates repeated Notifications Plus audio requests by request ID
 and prevents the webapp from autoplaying an old last announcement when the
 Watchkeeper Audio tab is reopened from Console.
@@ -81,7 +86,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.1 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.5 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
