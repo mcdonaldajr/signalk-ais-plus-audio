@@ -35,7 +35,6 @@ module.exports = function aisPlusAudio(app) {
   let currentLocalPlaybackChild = null;
   let currentLocalPlaybackEntry = null;
   let lastAnnouncement = null;
-  let aisPlusMuted = false;
   let engineMuted = false;
   let engineAudioPolicy = null;
   let engineSessionId = "";
@@ -134,7 +133,6 @@ module.exports = function aisPlusAudio(app) {
     currentLocalPlaybackChild = null;
     currentLocalPlaybackEntry = null;
     activeNotificationSubjects = new Set();
-    aisPlusMuted = false;
     engineMuted = false;
     engineAudioPolicy = null;
     stopLiveStreamSilence();
@@ -152,7 +150,7 @@ module.exports = function aisPlusAudio(app) {
     properties: {
       enabled: {
         type: "boolean",
-        title: "Enable AIS Plus audio rendering",
+        title: "Enable Watchkeeper Audio rendering",
         default: true,
       },
       muted: {
@@ -760,18 +758,6 @@ module.exports = function aisPlusAudio(app) {
       return;
     }
     rememberNotificationsPlusAudioRequest(requestKey);
-    const muteState = envelope?.delivery?.muteState;
-    if (muteState === true) {
-      aisPlusMuted = true;
-      clearQueuedAnnouncements("Provider muted audio");
-      publishStatus();
-      return;
-    }
-    if (muteState === false) {
-      aisPlusMuted = false;
-      publishStatus();
-    }
-
     const message = String(envelope?.presentation?.message || "").trim();
     if (!message || envelope?.delivery?.audio !== true) {
       stats.filtered += 1;
@@ -1293,7 +1279,7 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function isAudioMuted() {
-    return options.muted === true || aisPlusMuted === true || engineMuted === true;
+    return options.muted === true || engineMuted === true;
   }
 
   function isAudioMutedForEntry(entry) {
@@ -1325,7 +1311,7 @@ module.exports = function aisPlusAudio(app) {
       engineAudioPolicy,
       engineSessionId,
       engineAudioPolicySequence: lastEngineAudioPolicySequence,
-      aisPlusMuted,
+      aisPlusMuted: false,
       localPlayback: options.localPlayback,
       liveStream: options.liveStream,
       liveStreamClients: liveStreamClients.size,

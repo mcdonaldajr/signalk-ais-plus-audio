@@ -226,7 +226,6 @@ function renderOutputRouting(status) {
   const mutedReasons = [];
   if (status.pluginMuted) mutedReasons.push("Audio muted here");
   if (status.engineMuted) mutedReasons.push("muted by Traffic Core");
-  if (status.aisPlusMuted) mutedReasons.push("muted by AIS Plus");
   outputStatus.textContent = [
     `Browser ${browserOutputModeLabel(browserOutputMode)}`,
     `Pi speaker ${status.localPlayback !== false ? "on" : "off"}`,

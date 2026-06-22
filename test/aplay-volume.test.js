@@ -305,6 +305,8 @@ async function postOutputs(harness, body) {
   assert.match(browserApp, /checkBrowserSpeech/);
   assert.match(browserApp, /disableCompetingBrowserSpeech/);
   assert.match(browserApp, /speakLastAnnouncementInBrowser/);
+  assert.doesNotMatch(browserApp, /muted by notification provider/);
+  assert.doesNotMatch(browserApp, /muted by AIS Plus/);
   assert.match(browserApp, /postJson\("outputs"/);
 
   const defaults = createHarness();
@@ -597,14 +599,14 @@ async function postOutputs(harness, body) {
     "notifications.collision.soundState",
     soundStateNotification(true),
   );
-  assert.equal(statusOf(queuedMute).queueLength, 0);
-  assert.equal(statusOf(queuedMute).aisPlusMuted, true);
-  assert.equal(statusOf(queuedMute).muted, true);
-  const queueClearsAfterFirstMute = statusOf(queuedMute).recentEvents.filter(
-    (event) => event.event === "queue-cleared",
+  assert.ok(statusOf(queuedMute).queueLength >= 2);
+  assert.equal(statusOf(queuedMute).aisPlusMuted, false);
+  assert.equal(statusOf(queuedMute).muted, false);
+  assert.equal(
+    statusOf(queuedMute).recentEvents.filter((event) => event.event === "queue-cleared").length,
+    0,
+    "provider mute does not clear the queue",
   );
-  assert.equal(queueClearsAfterFirstMute.length, 1);
-  assert.doesNotMatch(queueClearsAfterFirstMute[0].message, /queue already empty/);
   sendNotification(
     queuedMute,
     "notifications.collision.soundState",
@@ -612,15 +614,15 @@ async function postOutputs(harness, body) {
   );
   assert.equal(
     statusOf(queuedMute).recentEvents.filter((event) => event.event === "queue-cleared").length,
-    1,
-    "repeated provider mute with an empty queue is not logged again",
+    0,
+    "repeated provider mute is ignored by Audio",
   );
   sendNotification(
     queuedMute,
     "notifications.collision.235900004",
     vesselNotification("235900004", "Traffic advisory. Fourth vessel."),
   );
-  assert.equal(statusOf(queuedMute).queueLength, 0);
+  assert.ok(statusOf(queuedMute).queueLength >= 3);
   sendNotification(
     queuedMute,
     "notifications.collision.soundState",
@@ -686,6 +688,8 @@ async function postOutputs(harness, body) {
     "notifications.collision.soundState",
     soundStateNotification(true),
   );
+  assert.equal(statusOf(emptyProviderMute).muted, false);
+  assert.equal(statusOf(emptyProviderMute).aisPlusMuted, false);
   assert.equal(emptyProviderMute.savedOptions.length, 0);
   assert.equal(
     statusOf(emptyProviderMute).recentEvents.some(

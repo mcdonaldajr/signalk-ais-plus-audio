@@ -2,6 +2,13 @@
 
 ## Version 2 baseline
 
+`v2.3.8` makes Audio mute authority explicit: only Watchkeeper Audio's manual
+mute and Traffic Core's Audio Policy can mute playback. Provider
+`delivery.muteState` flags are ignored by Audio.
+
+`v2.3.7` removes old AIS Plus wording from visible Audio status and
+configuration labels.
+
 `v2.3.6` replaces the browser playback checkbox with an explicit browser output
 mode: Off, browser speech synthesis, or Watchkeeper Piper playback. Pi speaker,
 radio stream, and mute remain independent switches.
@@ -26,13 +33,14 @@ not intentionally change runtime behavior from `v1.4.7`.
 timeline as soon as MP3 rendering completes. Pi speaker playback remains on
 the fastest WAV-ready path and is never delayed for Companion.
 
-`v2.2.0` observes the versioned AIS Plus Engine Audio Policy projection.
+`v2.2.0` observes the versioned Traffic Core Audio Policy projection.
 Engine mute and stationary automute are enforced only when that projection is
 explicitly authoritative in Engine mode. Shadow policy remains observable but
 cannot mute Audio. Session changes reset sequence tracking and stale or
 non-monotonic policy updates are ignored.
 
-`v2.3.1` suppresses repeated no-op provider-mute queue-clear events, so the Audio recent-event log no longer fills with "Provider muted audio: queue already empty" while already muted.
+`v2.3.1` suppressed repeated no-op provider-mute queue-clear events; provider
+mute flags are ignored entirely by Audio from `v2.3.8`.
 
 `v2.3.0` restores output routing controls in the Watchkeeper Audio webapp. Browser
 playback is a local per-device setting, while Pi speaker output, radio stream
@@ -89,7 +97,7 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.6 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.8 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
@@ -119,7 +127,7 @@ Some apps prefer an M3U playlist:
 https://nemo3.local:3445/live.m3u
 ```
 
-The local stream port serves only the generated audio stream, so native radio player apps do not need a Signal K login cookie. It uses the same `ssl-cert.pem` and `ssl-key.pem` as Signal K when they are available. The stream sends silence between announcements and writes each rendered AIS Plus announcement into the stream as it is produced.
+The local stream port serves only the generated audio stream, so native radio player apps do not need a Signal K login cookie. It uses the same `ssl-cert.pem` and `ssl-key.pem` as Signal K when they are available. The stream sends silence between announcements and writes each rendered Watchkeeper announcement into the stream as it is produced.
 
 ### iPhone/iPad Setup
 
@@ -173,17 +181,17 @@ For normal use, keep the phone on the boat Wi-Fi and use the local `.local` addr
 - Providers decide notification meaning and publish standard Signal K notifications.
 - Notifications Plus applies priority, lifecycle, supersession, history, and delivery mechanics.
 - Watchkeeper Audio renders the broker's audio projection without classifying content.
-- AIS Plus Companion can play the rendered audio while open.
+- Watchkeeper Companion can play the rendered audio while open.
 - A native radio player can play the live stream while the phone or tablet is locked.
 
 ## Queue Behaviour
 
 Watchkeeper Audio keeps the current speaker announcement uninterrupted. When a new vessel announcement is queued, any older queued announcements for the same vessel are dropped before the new one is added. This keeps busy-area speech focused on the latest known state, including de-escalations from collision alarm back to advisory.
 
-When the authoritative provider or Engine Audio Policy is muted, AIS Plus
-Audio immediately clears its queued backlog and suppresses further non-forced
-announcements until sounds are enabled again. It does not interrupt an
-announcement already playing on the local speaker.
+When Watchkeeper Audio is manually muted or Traffic Core Audio Policy is muted,
+Watchkeeper Audio suppresses further non-forced announcements until sounds are
+enabled again. It does not interrupt an announcement already playing on the local
+speaker.
 
 ## Notes
 
