@@ -87,6 +87,35 @@ function sendNotification(
   const alertEvent = value?.data?.alertEvent || {};
   const muteState =
     typeof value?.data?.muted === "boolean" ? value.data.muted : null;
+  const audioSequence = harness.brokerSequence;
+  const audioRequest = value?.data?.audioRequest || {
+    requestId: `test-broker:${audioSequence}`,
+  };
+  const audioEvent = {
+    schemaVersion: 1,
+    provider: "ais-plus",
+    subjectKey: pathName,
+    eventId: alertEvent.id || `${pathName}-${audioSequence}`,
+    lifecycle,
+    timestamp: new Date().toISOString(),
+    audioSequence,
+    priority: { level: "warning", score: priorityScore },
+    delivery: {
+      audio: true,
+      localPlayback: true,
+      streamOutput: true,
+      muteState,
+      preempt,
+    },
+    presentation: {
+      title: alertEvent.vesselName || "AIS Plus",
+      message: alertEvent.message || value?.message || "",
+      category: value?.data?.category || "notification",
+    },
+    context: {
+      mmsi: alertEvent.mmsi || "",
+    },
+  };
   harness.subscriptionCallbacks[0]({
     updates: [
       {
@@ -94,35 +123,19 @@ function sendNotification(
           {
             path: "plugins.notificationsPlus",
             value: {
-              audioSequence: harness.brokerSequence,
               active: activeSubjects.map((subjectKey) => ({ subjectKey })),
-              audioRequest: value?.data?.audioRequest || {
-                requestId: `test-broker:${harness.brokerSequence}`,
-              },
-              lastAudioEvent: {
-                schemaVersion: 1,
-                provider: "ais-plus",
-                subjectKey: pathName,
-                eventId: alertEvent.id || `${pathName}-${harness.brokerSequence}`,
-                lifecycle,
-                timestamp: new Date().toISOString(),
-                priority: { level: "warning", score: priorityScore },
-                delivery: {
-                  audio: true,
-                  localPlayback: true,
-                  streamOutput: true,
-                  muteState,
-                  preempt,
-                },
-                presentation: {
-                  title: alertEvent.vesselName || "AIS Plus",
-                  message: alertEvent.message || value?.message || "",
-                  category: value?.data?.category || "notification",
-                },
-                context: {
-                  mmsi: alertEvent.mmsi || "",
-                },
-              },
+            },
+          },
+          {
+            path: "plugins.notificationsPlus.audio",
+            value: {
+              contract: "notifications-plus-audio-delivery",
+              contractVersion: 1,
+              sessionId: "test-broker-session",
+              sequence: audioSequence,
+              audioSequence,
+              audioRequest,
+              event: audioEvent,
             },
           },
         ],
@@ -344,6 +357,38 @@ async function postRepeatLast(harness) {
     { level: 53, mixer: 75 },
   );
   defaults.plugin.stop();
+
+  const stateOnly = createHarness();
+  stateOnly.subscriptionCallbacks[0]({
+    updates: [
+      {
+        values: [
+          {
+            path: "plugins.notificationsPlus",
+            value: {
+              sessionId: "state-only-session",
+              audioSequence: 1,
+              audioRequest: { requestId: "sticky-legacy-request" },
+              lastAudioEvent: {
+                eventId: "sticky-legacy-event",
+                timestamp: new Date().toISOString(),
+                delivery: { audio: true },
+                priority: { level: "information", score: 100 },
+                presentation: { message: "Sticky state projection should not speak." },
+              },
+              active: [],
+            },
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(
+    statusOf(stateOnly).stats.queued,
+    0,
+    "sticky broker state projections do not queue audio",
+  );
+  stateOnly.plugin.stop();
 
   const legacyMinimum = createHarness({ aplayVolumePercent: 66 });
   assert.deepEqual(

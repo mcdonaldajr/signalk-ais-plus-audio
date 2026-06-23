@@ -1,6 +1,6 @@
 {
   "name": "signalk-ais-plus-audio",
-  "version": "2.3.14",
+  "version": "2.3.15",
   "description": "Watchkeeper Audio renderer and browser audio control for notification delivery events.",
   "main": "plugin/index.js",
   "scripts": {

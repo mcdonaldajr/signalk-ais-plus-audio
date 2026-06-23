@@ -21,6 +21,7 @@ const DEFAULT_APLAY_VOLUME_CONTROL = "PCM";
 const DEFAULT_APLAY_VOLUME_COMMAND = "amixer";
 const APLAY_VOLUME_FALLBACK_CONTROLS = ["PCM", "Master", "Headphone", "Speaker"];
 const NOTIFICATIONS_PLUS_PATH = "plugins.notificationsPlus";
+const NOTIFICATIONS_PLUS_AUDIO_PATH = "plugins.notificationsPlus.audio";
 const ENGINE_AUDIO_POLICY_PATH = "plugins.aisPlusEngine.audioPolicy";
 
 module.exports = function aisPlusAudio(app) {
@@ -685,6 +686,7 @@ module.exports = function aisPlusAudio(app) {
       context: "vessels.self",
       subscribe: [
         { path: NOTIFICATIONS_PLUS_PATH, policy: "instant", format: "delta" },
+        { path: NOTIFICATIONS_PLUS_AUDIO_PATH, policy: "instant", format: "delta" },
         { path: ENGINE_AUDIO_POLICY_PATH, policy: "instant", format: "delta" },
       ],
     };
@@ -705,6 +707,8 @@ module.exports = function aisPlusAudio(app) {
       for (const value of update.values || []) {
         if (value?.path === ENGINE_AUDIO_POLICY_PATH) {
           handleEngineAudioPolicy(value.value);
+        } else if (value?.path === NOTIFICATIONS_PLUS_AUDIO_PATH) {
+          handleNotificationsPlusAudioDelivery(value.value);
         } else {
           handleNotificationValue(value);
         }
@@ -737,11 +741,7 @@ module.exports = function aisPlusAudio(app) {
   function handleNotificationValue(value) {
     if (value?.path !== NOTIFICATIONS_PLUS_PATH) return;
     const projection = value.value;
-    const brokerSessionId = String(projection?.sessionId || "");
-    if (brokerSessionId && brokerSessionId !== notificationsPlusSessionId) {
-      notificationsPlusSessionId = brokerSessionId;
-      lastNotificationsPlusAudioSequence = 0;
-    }
+    updateNotificationsPlusSession(projection);
     activeNotificationSubjects = new Set(
       Array.isArray(projection?.active)
         ? projection.active
@@ -749,12 +749,25 @@ module.exports = function aisPlusAudio(app) {
             .filter(Boolean)
         : [],
     );
-    const sequence = Number(projection?.audioSequence) || 0;
-    const envelope = projection?.lastAudioEvent;
+  }
+
+  function handleNotificationsPlusAudioDelivery(projection) {
+    if (projection?.contract !== "notifications-plus-audio-delivery") return;
+    updateNotificationsPlusSession(projection);
+    const sequence = Number(projection?.audioSequence || projection?.sequence) || 0;
+    const envelope = projection?.event || projection?.lastAudioEvent;
     if (!envelope || sequence <= lastNotificationsPlusAudioSequence) return;
     lastNotificationsPlusAudioSequence = sequence;
     stats.received += 1;
     handleNotificationsPlusAudio(envelope, projection?.audioRequest);
+  }
+
+  function updateNotificationsPlusSession(projection) {
+    const brokerSessionId = String(projection?.sessionId || "");
+    if (brokerSessionId && brokerSessionId !== notificationsPlusSessionId) {
+      notificationsPlusSessionId = brokerSessionId;
+      lastNotificationsPlusAudioSequence = 0;
+    }
   }
 
   function handleNotificationsPlusAudio(envelope, request = null) {
