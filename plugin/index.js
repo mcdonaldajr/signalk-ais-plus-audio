@@ -759,16 +759,20 @@ module.exports = function aisPlusAudio(app) {
 
   function handleNotificationsPlusAudio(envelope, request = null) {
     const receivedAt = new Date().toISOString();
-    const requestKey = notificationsPlusAudioRequestKey(envelope, request);
-    if (requestKey && processedNotificationsPlusAudioRequests.has(requestKey)) {
+    const requestKeys = notificationsPlusAudioRequestKeys(envelope, request);
+    if (
+      requestKeys.some((requestKey) =>
+        processedNotificationsPlusAudioRequests.has(requestKey),
+      )
+    ) {
       stats.filtered += 1;
       addRecent(
         "duplicate",
-        `Ignored duplicate audio request: ${envelope?.presentation?.message || requestKey}`,
+        `Ignored duplicate audio request: ${envelope?.presentation?.message || requestKeys[0]}`,
       );
       return;
     }
-    rememberNotificationsPlusAudioRequest(requestKey);
+    rememberNotificationsPlusAudioRequests(requestKeys);
     const message = String(envelope?.presentation?.message || "").trim();
     if (!message || envelope?.delivery?.audio !== true) {
       stats.filtered += 1;
@@ -799,18 +803,21 @@ module.exports = function aisPlusAudio(app) {
     enqueue(entry);
   }
 
-  function notificationsPlusAudioRequestKey(envelope, request) {
-    return String(
-      request?.requestId ||
-        envelope?.audioSequence ||
-        envelope?.eventId ||
-        "",
-    ).trim();
+  function notificationsPlusAudioRequestKeys(envelope, request) {
+    return [
+      envelope?.eventId,
+      request?.eventId,
+      request?.requestId,
+      envelope?.audioSequence,
+    ]
+      .map((key) => String(key || "").trim())
+      .filter(Boolean);
   }
 
-  function rememberNotificationsPlusAudioRequest(requestKey) {
-    if (!requestKey) return;
-    processedNotificationsPlusAudioRequests.add(requestKey);
+  function rememberNotificationsPlusAudioRequests(requestKeys) {
+    for (const requestKey of requestKeys) {
+      processedNotificationsPlusAudioRequests.add(requestKey);
+    }
     if (processedNotificationsPlusAudioRequests.size <= 200) return;
     processedNotificationsPlusAudioRequests = new Set(
       [...processedNotificationsPlusAudioRequests].slice(-160),

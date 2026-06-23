@@ -678,6 +678,34 @@ async function postRepeatLast(harness) {
   assert.equal(statusOf(duplicateRequest).stats.filtered, 1);
   duplicateRequest.plugin.stop();
 
+  const duplicateEvent = createHarness();
+  const duplicatedEventNotification = vesselNotification(
+    "duplicate-event",
+    "This event should only queue once.",
+  );
+  duplicatedEventNotification.data.alertEvent.id = "stable-provider-event";
+  sendNotification(
+    duplicateEvent,
+    "notifications.collision.duplicate-event",
+    duplicatedEventNotification,
+  );
+  assert.equal(statusOf(duplicateEvent).stats.queued, 1);
+  duplicatedEventNotification.data.audioRequest = {
+    requestId: "new-broker-request-after-republish",
+  };
+  sendNotification(
+    duplicateEvent,
+    "notifications.collision.duplicate-event",
+    duplicatedEventNotification,
+  );
+  assert.equal(
+    statusOf(duplicateEvent).stats.queued,
+    1,
+    "same provider eventId is not queued twice after a broker request id changes",
+  );
+  assert.equal(statusOf(duplicateEvent).stats.filtered, 1);
+  duplicateEvent.plugin.stop();
+
   const mutedSkip = createHarness({ muted: true });
   sendNotification(
     mutedSkip,
