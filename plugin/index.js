@@ -23,6 +23,7 @@ const APLAY_VOLUME_FALLBACK_CONTROLS = ["PCM", "Master", "Headphone", "Speaker"]
 const NOTIFICATIONS_PLUS_PATH = "plugins.notificationsPlus";
 const NOTIFICATIONS_PLUS_AUDIO_PATH = "plugins.notificationsPlus.audio";
 const ENGINE_AUDIO_POLICY_PATH = "plugins.aisPlusEngine.audioPolicy";
+const PIPER_INSTALL_ENDPOINT = "/plugins/signalk-pi-controller/actions/install-piper";
 
 module.exports = function aisPlusAudio(app) {
   const plugin = {};
@@ -106,6 +107,13 @@ module.exports = function aisPlusAudio(app) {
       aplayVolumePercent: options.aplayVolumePercent,
     };
     ensureAudioDirectory();
+    const dependencyStatus = checkDependencies();
+    if (dependencyStatus.piper.status !== "ok" || dependencyStatus.voice.status !== "ok") {
+      addRecent(
+        "warning",
+        `Piper setup incomplete: ${dependencyStatus.summary}`,
+      );
+    }
     applyAplayVolume("startup").catch((error) => {
       addRecent("warning", `Local speaker volume not applied on startup: ${error.message}`);
     });
@@ -1268,6 +1276,75 @@ module.exports = function aisPlusAudio(app) {
       streamStats,
       audioDirectory: expandHome(options.audioDirectory),
       voices: listVoices(),
+      dependencies: checkDependencies(),
+    };
+  }
+
+  function checkDependencies() {
+    const piper = checkExecutable(options.piperBinary);
+    const ffmpeg = checkExecutable(options.ffmpegBinary);
+    const audioPlayer = checkExecutable(options.audioPlayer);
+    const voices = listVoices();
+    const voice = selectedVoiceFromList(voices);
+    const voiceDir = expandHome(options.voicesDir);
+    const missing = [];
+    if (piper.status !== "ok") missing.push("Piper executable");
+    if (!voice) missing.push("Piper voice model");
+    if (ffmpeg.status !== "ok") missing.push("FFmpeg executable");
+    if (options.localPlayback && audioPlayer.status !== "ok") {
+      missing.push("local audio player");
+    }
+    const piperInstallAvailable = piper.status !== "ok" || !voice;
+    return {
+      ok: missing.length === 0,
+      summary: missing.length ? `${missing.join(", ")} missing` : "Piper renderer ready",
+      piper,
+      ffmpeg,
+      audioPlayer,
+      voice: voice
+        ? { status: "ok", id: voice.id, file: voice.file }
+        : {
+            status: "missing",
+            id: options.voice,
+            directory: voiceDir,
+            message: `No .onnx voice model found in ${voiceDir}`,
+          },
+      voicesDirectory: voiceDir,
+      install: {
+        supportedByPiController: true,
+        available: piperInstallAvailable,
+        endpoint: PIPER_INSTALL_ENDPOINT,
+        message:
+          "Install Piper only after confirming this Signal K server is a Raspberry Pi with Pi Controller enabled.",
+      },
+    };
+  }
+
+  function checkExecutable(command) {
+    const value = String(command || "").trim();
+    if (!value) {
+      return { status: "missing", command: value, message: "Command is blank" };
+    }
+    const candidates = value.includes(path.sep)
+      ? [value]
+      : String(process.env.PATH || "")
+          .split(path.delimiter)
+          .filter(Boolean)
+          .map((dir) => path.join(dir, value));
+    for (const candidate of candidates) {
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return { status: "ok", command: value, path: candidate };
+      } catch {
+        // Try the next PATH entry.
+      }
+    }
+    return {
+      status: "missing",
+      command: value,
+      message: value.includes(path.sep)
+        ? `${value} is not executable`
+        : `${value} was not found on PATH`,
     };
   }
 
@@ -1289,7 +1366,10 @@ module.exports = function aisPlusAudio(app) {
   }
 
   function selectedVoice() {
-    const voices = listVoices();
+    return selectedVoiceFromList(listVoices());
+  }
+
+  function selectedVoiceFromList(voices) {
     if (!voices.length) return null;
     return (
       voices.find((voice) => voice.selected) ||

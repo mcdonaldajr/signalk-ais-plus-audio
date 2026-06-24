@@ -37,6 +37,9 @@ const checkPiOutput = document.getElementById("checkPiOutput");
 const checkStreamOutput = document.getElementById("checkStreamOutput");
 const checkMuteAll = document.getElementById("checkMuteAll");
 const outputStatus = document.getElementById("outputStatus");
+const dependencyPanel = document.getElementById("dependencyPanel");
+const dependencyStatus = document.getElementById("dependencyStatus");
+const buttonInstallPiper = document.getElementById("buttonInstallPiper");
 const aplayVolumeRange = document.getElementById("aplayVolumeRange");
 const aplayVolumeValue = document.getElementById("aplayVolumeValue");
 const aplayVolumeStatus = document.getElementById("aplayVolumeStatus");
@@ -61,6 +64,7 @@ bindCommandButton("buttonRepeatLast", "repeat-last", "Repeat last sent.");
 bindCommandButton("buttonClearQueue", "clear-queue", "Clear queue sent.");
 bindCommandButton("buttonRestartStreams", "restart-streams", "Restart streams sent.");
 bindCommandButton("buttonStreamTimeCheck", "stream-time-check", "Stream time check sent.");
+buttonInstallPiper.addEventListener("click", installPiperWithPiController);
 checkPingEnabled.addEventListener("change", () => {
   postJson(`ping-enabled?enabled=${checkPingEnabled.checked ? "true" : "false"}`).catch(
     renderCommandError,
@@ -177,6 +181,7 @@ function renderStatus(status) {
   streamDisconnectedTotal.textContent = streamStats.disconnectedTotal != null ? streamStats.disconnectedTotal : 0;
   checkPingEnabled.checked = status.pingEnabled !== false;
   renderOutputRouting(status);
+  renderDependencies(status.dependencies || null);
   renderAplayVolumeControl(status);
   audioDirectory.textContent = status.audioDirectory || "";
   streamUrl.textContent =
@@ -244,6 +249,48 @@ function renderOutputRouting(status) {
     `radio stream ${status.liveStream !== false ? "on" : "off"}`,
     mutedReasons.length ? mutedReasons.join(", ") : "not muted",
   ].join(" · ");
+}
+
+function renderDependencies(dependencies) {
+  if (!dependencies) {
+    dependencyPanel.classList.remove("warn");
+    dependencyStatus.textContent = "Renderer dependency status unavailable.";
+    buttonInstallPiper.hidden = true;
+    return;
+  }
+  dependencyPanel.classList.toggle("warn", dependencies.ok === false);
+  dependencyStatus.textContent = dependencies.summary || "Renderer dependency status unavailable.";
+  const canInstallPiper = dependencies.install?.available === true;
+  buttonInstallPiper.hidden = !canInstallPiper;
+  buttonInstallPiper.disabled = !canInstallPiper;
+  buttonInstallPiper.dataset.endpoint = dependencies.install?.endpoint || "";
+}
+
+async function installPiperWithPiController() {
+  const endpoint = buttonInstallPiper.dataset.endpoint || "/plugins/signalk-pi-controller/actions/install-piper";
+  if (
+    !window.confirm(
+      "Install Piper on this Signal K server using Pi Controller? This downloads the Piper binary and voice model and may require sudo permissions.",
+    )
+  ) {
+    return;
+  }
+  try {
+    signalCommandButton(buttonInstallPiper, "Piper install requested through Pi Controller.");
+    const response = await fetchWithTimeout(endpoint, {
+      credentials: "include",
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ confirmed: true }),
+    });
+    await readResponse(response, "install-piper");
+    outputStatus.textContent =
+      "Piper install started. Refreshing status while Pi Controller works.";
+    window.setTimeout(refresh, 2000);
+  } catch (error) {
+    outputStatus.textContent =
+      `Piper install request failed: ${error.message || error}`;
+  }
 }
 
 function initialBrowserOutputMode() {

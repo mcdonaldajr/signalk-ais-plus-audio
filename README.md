@@ -2,6 +2,11 @@
 
 ## Version 2 baseline
 
+`v2.3.16` adds runtime dependency checks for Piper, FFmpeg, the configured
+voice model, and local audio playback. The webapp shows missing renderer
+dependencies and can ask Pi Controller to install Piper as an explicit user
+action; npm/AppStore installation does not run OS-level installers silently.
+
 `v2.3.10` gives Watchkeeper Audio command buttons raised/pressed visual states
 and a short command-sent pulse so touchscreen taps are visibly acknowledged.
 
@@ -105,11 +110,21 @@ The radio stream is intended for iPhone/iPad/Android apps that can keep a stream
 
 ```sh
 cd ~/.signalk
-npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.10 --omit=dev --no-package-lock
+npm install git+ssh://git@ssh.github.com:443/mcdonaldajr/signalk-ais-plus-audio.git#v2.3.16 --omit=dev --no-package-lock
 sudo systemctl restart signalk
 ```
 
 Open **Watchkeeper Audio** from the Signal K webapps page.
+
+Piper is optional at install time. Browser speech synthesis can be used without
+Piper, but Pi speaker playback, Piper browser playback, and the radio stream
+need Piper, a Piper voice model, and FFmpeg on the Signal K server. Watchkeeper
+Audio reports missing renderer dependencies on its page and in
+`vessels.self.plugins.aisPlusAudio.dependencies`.
+
+If Pi Controller is installed and support actions are enabled, Watchkeeper Audio
+can request a Piper install from its dependency panel. That action is deliberately
+manual and confirmed; it is not run by npm or by Signal K AppStore installation.
 
 The **Enable directional ping** checkbox in the Watchkeeper Audio webapp can switch the ping on or off immediately while Signal K is running. The **Local speaker level** slider sets and saves the logarithmic default level for local `aplay` output, with its minimum mapped to `66%` mixer volume. The Signal K plugin configuration still provides the startup defaults and ping volume/frequency settings.
 

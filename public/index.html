@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Watchkeeper Audio</title>
-    <link rel="stylesheet" href="/signalk-ais-plus-audio/styles.css?v=2.3.10" />
+    <link rel="stylesheet" href="/signalk-ais-plus-audio/styles.css?v=2.3.16" />
   </head>
   <body>
     <main>
@@ -64,6 +64,13 @@
             <span>Mute all Watchkeeper Audio outputs</span>
           </label>
           <p class="muted" id="outputStatus">Output routing waiting for Audio status.</p>
+        </div>
+        <div class="dependency-panel" id="dependencyPanel">
+          <h3>Renderer dependencies</h3>
+          <p id="dependencyStatus" class="muted">Checking Piper renderer dependencies.</p>
+          <button type="button" id="buttonInstallPiper" class="secondary" hidden>
+            Install Piper with Pi Controller
+          </button>
         </div>
         <div class="slider-control">
           <label for="aplayVolumeRange">
@@ -155,6 +162,6 @@
         }
       }, 3000);
     </script>
-    <script src="/signalk-ais-plus-audio/app.js?v=2.3.10"></script>
+    <script src="/signalk-ais-plus-audio/app.js?v=2.3.16"></script>
   </body>
 </html>

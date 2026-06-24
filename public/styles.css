@@ -169,6 +169,25 @@ button:focus-visible {
   padding: 12px;
 }
 
+.dependency-panel {
+  background: #0b1423;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+}
+
+.dependency-panel.warn {
+  border-color: rgb(251 191 36 / 48%);
+  background: #231a0b;
+}
+
+.dependency-panel button {
+  justify-self: start;
+}
+
 .output-routing .toggle-row {
   margin-top: 8px;
 }

@@ -331,6 +331,8 @@ async function postRepeatLast(harness) {
   assert.match(html, /checkPiOutput/);
   assert.match(html, /checkStreamOutput/);
   assert.match(html, /checkMuteAll/);
+  assert.match(html, /dependencyPanel/);
+  assert.match(html, /buttonInstallPiper/);
   assert.match(browserApp, /BROWSER_OUTPUT_MODE_STORAGE_KEY/);
   assert.match(browserApp, /BROWSER_OUTPUT_MODES/);
   assert.match(browserApp, /CONSOLE_AUDIO_HOSTED/);
@@ -344,11 +346,16 @@ async function postRepeatLast(harness) {
   assert.match(browserApp, /bindCommandButton/);
   assert.match(browserApp, /signalCommandButton/);
   assert.match(browserApp, /postJson\("outputs"/);
+  assert.match(browserApp, /installPiperWithPiController/);
+  assert.match(browserApp, /signalk-pi-controller\/actions\/install-piper/);
   assert.match(browserCss, /button\.command-sent/);
+  assert.match(browserCss, /dependency-panel/);
   assert.match(browserCss, /transform:\s*translateY\(4px\)/);
   assert.match(browserCss, /box-shadow/);
 
   const defaults = createHarness();
+  assert.equal(statusOf(defaults).dependencies.install.supportedByPiController, true);
+  assert.match(statusOf(defaults).dependencies.install.endpoint, /install-piper/);
   assert.deepEqual(
     {
       level: statusOf(defaults).aplayVolumeLevelPercent,
@@ -462,6 +469,9 @@ async function postRepeatLast(harness) {
   darwinSavedAmixer.plugin.stop();
 
   const pipeline = createPipelineHarness();
+  assert.equal(statusOf(pipeline).dependencies.ok, true);
+  assert.equal(statusOf(pipeline).dependencies.install.available, false);
+  assert.equal(statusOf(pipeline).dependencies.voice.status, "ok");
   sendNotification(
     pipeline,
     "notifications.system.first",
