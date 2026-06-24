@@ -621,13 +621,13 @@ async function postRepeatLast(harness) {
     .map((event) => event.message);
   assert.match(
     synthesisStarts[0],
-    /Warning preparing first/,
-    "an announcement already in synthesis keeps the speaker lane",
+    /Alarm arrived during synthesis/,
+    "a higher-priority announcement queued during synthesis gets the next speaker lane",
   );
-  assert.match(synthesisStarts[1], /Alarm arrived during synthesis/);
+  assert.match(synthesisStarts[1], /Warning preparing first/);
   assert.equal(
     synthesisRaceStatus.recentEvents.some((event) => event.event === "reprioritized"),
-    false,
+    true,
   );
   preparationRace.plugin.stop();
   await new Promise((resolve) => setTimeout(resolve, 50));

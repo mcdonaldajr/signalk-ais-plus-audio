@@ -906,6 +906,9 @@ module.exports = function aisPlusAudio(app) {
           );
         }
         cleanupPreparedAnnouncement(next);
+      } else if (shouldPreparedAnnouncementYield(next.entry)) {
+        requeuePreparedAnnouncement(next);
+        processQueue();
       } else {
         deliverPreparedAnnouncement(next);
       }
@@ -1085,6 +1088,24 @@ module.exports = function aisPlusAudio(app) {
   function cleanupPreparedAnnouncement(preparation) {
     if (!preparation) return;
     fs.rm(preparation.combinedWav, { force: true }, () => {});
+  }
+
+  function shouldPreparedAnnouncementYield(entry) {
+    const preparedPriority = Number(entry?.priorityScore || 0);
+    return queue.some((queuedEntry) => Number(queuedEntry?.priorityScore || 0) > preparedPriority);
+  }
+
+  function requeuePreparedAnnouncement(preparation) {
+    const entry = preparation.entry;
+    entry.reprioritizedAt = new Date().toISOString();
+    queue.push(entry);
+    sortAnnouncementQueue();
+    cleanupPreparedAnnouncement(preparation);
+    publishTimeline("reprioritized", entry);
+    addRecent(
+      "reprioritized",
+      `[priority ${entry.priorityScore}] ${entry.message} yielded to a higher-priority queued announcement`,
+    );
   }
 
   function sortAnnouncementQueue() {
