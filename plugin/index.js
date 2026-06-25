@@ -861,11 +861,7 @@ module.exports = function aisPlusAudio(app) {
 
     const supersedeKey = announcementSupersedeKey(entry);
     if (supersedeKey) {
-      const previousLength = queue.length;
-      queue = queue.filter(
-        (queuedEntry) => announcementSupersedeKey(queuedEntry) !== supersedeKey,
-      );
-      const removed = previousLength - queue.length;
+      const removed = supersedeAnnouncementsWithKey(supersedeKey);
       if (removed > 0) {
         addRecent(
           "superseded",
@@ -1152,11 +1148,59 @@ module.exports = function aisPlusAudio(app) {
 
   function announcementSupersedeKey(entry) {
     if (!entry || entry.force || entry.category === "stream-health") return "";
+    const gpsKey = gpsAnnouncementSupersedeKey(entry);
+    if (gpsKey) return gpsKey;
     const vesselId = String(entry.vesselId || entry.mmsi || "").trim();
     if (vesselId) return `vessel:${vesselId}`;
     const sourcePath = String(entry.sourcePath || "").trim();
     const collisionMatch = sourcePath.match(/^notifications\.collision\.([^.\s]+)$/);
     if (collisionMatch?.[1]) return `collision:${collisionMatch[1]}`;
+    return "";
+  }
+
+  function supersedeAnnouncementsWithKey(supersedeKey) {
+    const key = String(supersedeKey || "");
+    if (!key) return 0;
+    const previousLength = queue.length;
+    queue = queue.filter(
+      (queuedEntry) => announcementSupersedeKey(queuedEntry) !== key,
+    );
+    let removed = previousLength - queue.length;
+    const preparingEntry = preparing?.entry || null;
+    if (
+      preparingEntry &&
+      preparingEntry.superseded !== true &&
+      announcementSupersedeKey(preparingEntry) === key
+    ) {
+      preparingEntry.superseded = true;
+      removed += 1;
+    }
+    const preparedEntry = prepared?.entry || null;
+    if (
+      preparedEntry &&
+      preparedEntry.superseded !== true &&
+      announcementSupersedeKey(preparedEntry) === key
+    ) {
+      preparedEntry.superseded = true;
+      cleanupPreparedAnnouncement(prepared);
+      prepared = null;
+      removed += 1;
+    }
+    return removed;
+  }
+
+  function gpsAnnouncementSupersedeKey(entry) {
+    const subjectKey = String(entry?.subjectKey || entry?.vesselId || "").trim();
+    const category = String(entry?.category || "").trim().toLowerCase();
+    const message = String(entry?.message || "");
+    if (
+      subjectKey === "navigation.gnss.integrity" ||
+      subjectKey === "ais-plus:system:gps-received" ||
+      category === "gps" ||
+      /\bGPS (received|lost|position is missing|position is invalid)\b/i.test(message)
+    ) {
+      return "system:gps-state";
+    }
     return "";
   }
 

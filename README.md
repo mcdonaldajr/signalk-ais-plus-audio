@@ -2,6 +2,10 @@
 
 ## Version 2 baseline
 
+`v2.3.18` treats GPS received/lost announcements as mutually exclusive GPS
+state messages, so a later GPS lost event drops any stale queued or prepared
+GPS received announcement before it can be spoken.
+
 `v2.3.16` adds runtime dependency checks for Piper, FFmpeg, the configured
 voice model, and local audio playback. The webapp shows missing renderer
 dependencies and can ask Pi Controller to install Piper as an explicit user

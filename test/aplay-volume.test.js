@@ -761,6 +761,47 @@ async function postRepeatLast(harness) {
   assert.equal(statusOf(duplicateEvent).stats.filtered, 1);
   duplicateEvent.plugin.stop();
 
+  const gpsStateSupersede = createPipelineHarness({ piperDelaySeconds: 0.2 });
+  sendNotification(
+    gpsStateSupersede,
+    "ais-plus:system:gps-received",
+    {
+      state: "alert",
+      method: ["sound"],
+      message: "GPS received.",
+      data: { category: "gps", alertEvent: { message: "GPS received." } },
+    },
+    200,
+  );
+  await waitFor(() => statusOf(gpsStateSupersede).preparing);
+  sendNotification(
+    gpsStateSupersede,
+    "navigation.gnss.integrity",
+    {
+      state: "alarm",
+      method: ["sound"],
+      message: "GPS position is missing or invalid.",
+      data: {
+        category: "Navigation",
+        alertEvent: { message: "GPS position is missing or invalid." },
+      },
+    },
+    850,
+  );
+  const gpsStateStatus = await waitFor(
+    () => (statusOf(gpsStateSupersede).stats.rendered >= 1 ? statusOf(gpsStateSupersede) : null),
+    5000,
+  );
+  assert.equal(gpsStateStatus.lastAnnouncement.message, "GPS position is missing or invalid.");
+  assert.equal(
+    gpsStateStatus.recentEvents.some((event) => event.event === "superseded"),
+    true,
+    "a later GPS lost announcement drops a stale queued or prepared GPS received announcement",
+  );
+  gpsStateSupersede.plugin.stop();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  fs.rmSync(gpsStateSupersede.tempDir, { recursive: true, force: true });
+
   const mutedSkip = createHarness({ muted: true });
   sendNotification(
     mutedSkip,
